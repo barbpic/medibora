@@ -29,11 +29,12 @@ from app.routes.audit import audit_bp
 from app.routes.alerts import alerts_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
-    app.register_blueprint(patients_bp, url_prefix='/api/patients')
-    app.register_blueprint(encounters_bp, url_prefix='/api/encounters')
-    app.register_blueprint(users_bp, url_prefix='/api/users')
-    app.register_blueprint(ai_bp, url_prefix='/api/ai')
-    app.register_blueprint(audit_bp, url_prefix='/api/audit')
+app.register_blueprint(patients_bp, url_prefix='/api/patients')
+app.register_blueprint(encounters_bp, url_prefix='/api/encounters')
+app.register_blueprint(users_bp, url_prefix='/api/users')
+app.register_blueprint(ai_bp, url_prefix='/api/ai')
+app.register_blueprint(audit_bp, url_prefix='/api/audit')
+app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
     
     # Create database tables
     with app.app_context():
