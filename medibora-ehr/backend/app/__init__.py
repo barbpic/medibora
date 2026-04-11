@@ -20,12 +20,13 @@ def create_app(config_class=Config):
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     
     # Register blueprints
-    from app.routes.auth import auth_bp
-    from app.routes.patients import patients_bp
-    from app.routes.encounters import encounters_bp
-    from app.routes.users import users_bp
-    from app.routes.ai import ai_bp
-    from app.routes.audit import audit_bp
+from app.routes.auth import auth_bp
+from app.routes.patients import patients_bp
+from app.routes.encounters import encounters_bp
+from app.routes.users import users_bp
+from app.routes.ai import ai_bp
+from app.routes.audit import audit_bp
+from app.routes.alerts import alerts_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(patients_bp, url_prefix='/api/patients')
