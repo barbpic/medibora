@@ -212,9 +212,13 @@ def update_encounter(encounter_id):
     if 'status' in data:
         encounter.status = data['status']
     
-    # Update vital signs if provided
-    if 'vital_signs' in data and encounter.vital_signs:
-        vs_data = data['vital_signs']
+   # Update vital signs if provided
+if 'vital_signs' in data:
+    vs_data = data['vital_signs']
+    
+    # Check if vital signs already exist for this encounter
+    if encounter.vital_signs:
+        # Update existing vital signs
         vital_signs = encounter.vital_signs
         
         if 'temperature' in vs_data:
@@ -237,9 +241,27 @@ def update_encounter(encounter_id):
             vital_signs.height = vs_data['height']
         if 'pain_score' in vs_data:
             vital_signs.pain_score = vs_data['pain_score']
-        
-        vital_signs.calculate_bmi()
-        vital_signs.check_critical_values()
+    else:
+        # Create new vital signs if they don't exist
+        vital_signs = VitalSigns(
+            patient_id=encounter.patient_id,
+            encounter_id=encounter.id,
+            recorded_by=current_user_id,
+            temperature=vs_data.get('temperature'),
+            temperature_site=vs_data.get('temperature_site'),
+            heart_rate=vs_data.get('heart_rate'),
+            respiratory_rate=vs_data.get('respiratory_rate'),
+            blood_pressure_systolic=vs_data.get('blood_pressure_systolic'),
+            blood_pressure_diastolic=vs_data.get('blood_pressure_diastolic'),
+            oxygen_saturation=vs_data.get('oxygen_saturation'),
+            weight=vs_data.get('weight'),
+            height=vs_data.get('height'),
+            pain_score=vs_data.get('pain_score')
+        )
+        db.session.add(vital_signs)
+    
+    vital_signs.calculate_bmi()
+    vital_signs.check_critical_values()
     
     db.session.commit()
     
