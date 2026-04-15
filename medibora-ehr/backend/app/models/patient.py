@@ -76,25 +76,36 @@ class Patient(db.Model):
             'encounter_count': len(self.encounters) if self.encounters else 0
         }
     
-    def to_summary_dict(self):
-        # Get last encounter date
-        last_encounter = None
-        if self.encounters and len(self.encounters) > 0:
-            last_encounter = sorted(self.encounters, key=lambda e: e.visit_date, reverse=True)[0]
-        
-        return {
-            'id': self.id,
-            'patient_id': self.patient_id,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'full_name': f"{self.first_name} {self.last_name}",
-            'age': self.get_age(),
-            'gender': self.gender,
-            'phone': self.phone,
-            'blood_type': self.blood_type,
-            'insurance': {
-                'provider': self.insurance_provider,
-                'number': self.insurance_number
-            },
-            'last_visit': last_encounter.visit_date.isoformat() if last_encounter else None
-        }
+   def to_summary_dict(self):
+    # Get last encounter date
+    last_encounter = None
+    if self.encounters and len(self.encounters) > 0:
+        last_encounter = sorted(self.encounters, key=lambda e: e.visit_date, reverse=True)[0]
+    
+    # Get most recent vital signs
+    latest_vital_signs = None
+    if self.vital_signs and len(self.vital_signs) > 0:
+        latest_vital_signs = sorted(self.vital_signs, key=lambda v: v.recorded_at, reverse=True)[0]
+    
+    return {
+        'id': self.id,
+        'patient_id': self.patient_id,
+        'first_name': self.first_name,
+        'last_name': self.last_name,
+        'full_name': f"{self.first_name} {self.last_name}",
+        'age': self.get_age(),
+        'gender': self.gender,
+        'phone': self.phone,
+        'blood_type': self.blood_type,
+        'allergies': self.allergies,
+        'chronic_conditions': self.chronic_conditions,
+        'current_medications': self.current_medications,
+        'insurance': {
+            'provider': self.insurance_provider,
+            'number': self.insurance_number
+        },
+        'last_visit': last_encounter.visit_date.isoformat() if last_encounter else None,
+        'latest_vital_signs': latest_vital_signs.to_dict() if latest_vital_signs else None,
+        'vital_signs_count': len(self.vital_signs) if self.vital_signs else 0,
+        'encounter_count': len(self.encounters) if self.encounters else 0
+    }
