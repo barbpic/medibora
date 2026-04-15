@@ -10,6 +10,7 @@ from app.ai.intelligent_search_tf_idf import get_search_engine, expand_medical_q
 from app.ai.rule_based_engine import get_rule_engine, AlertSeverity
 from app.ai.risk_classifier import get_risk_classifier
 from app.utils.interoperability import get_interoperability_service
+from datetime import datetime, timedelta, date
 
 ai_bp = Blueprint('ai', __name__)
 
@@ -55,27 +56,31 @@ def intelligent_search():
     patients = Patient.query.filter_by(is_active=True).all()
     
     for patient in patients:
-        # Add patient document
+        # Add patient document with expanded fields including county and symptoms
         documents.append({
             'id': patient.id,
             'type': 'patient',
             'title': f"{patient.last_name}, {patient.first_name}",
-            'content': f"{patient.chronic_conditions or ''} {patient.allergies or ''} {patient.current_medications or ''}",
+            'content': f"{patient.chronic_conditions or ''} {patient.allergies or ''} {patient.current_medications or ''} {patient.county or ''} {patient.city or ''} {patient.address or ''}",
             'metadata': {
                 'patient_id': patient.id,
                 'patient_id_number': patient.patient_id,
                 'age': patient.get_age(),
-                'gender': patient.gender
+                'gender': patient.gender,
+                'county': patient.county,
+                'city': patient.city,
+                'phone': patient.phone,
+                'email': patient.email
             }
         })
         
-        # Add encounter documents
+        # Add encounter documents with symptoms and diagnoses
         for encounter in patient.encounters:
             documents.append({
                 'id': encounter.id,
                 'type': 'encounter',
                 'title': f"Encounter {encounter.encounter_id}",
-                'content': f"{encounter.chief_complaint or ''} {encounter.assessment or ''} {encounter.diagnosis_primary or ''}",
+                'content': f"{encounter.chief_complaint or ''} {encounter.history_of_present_illness or ''} {encounter.assessment or ''} {encounter.diagnosis_primary or ''} {encounter.diagnosis_secondary or ''} {encounter.treatment_plan or ''} {encounter.procedures or ''} {encounter.lab_tests_ordered or ''}",
                 'metadata': {
                     'patient_id': patient.id,
                     'encounter_id': encounter.encounter_id,
@@ -144,8 +149,10 @@ def evaluate_patient_alerts(patient_id):
     # Calculate days since last visit
     days_since_last_visit = 365
     if last_encounter and last_encounter.visit_date:
-        days_since_last_visit = (db.func.current_date() - db.func.date(last_encounter.visit_date)).days
-    
+        visit_date = last_encounter.visit_date
+        if hasattr(visit_date, 'date'):
+            visit_date = visit_date.date()
+        days_since_last_visit = (date.today() - visit_date).days
     # Build patient data for rule evaluation
     patient_data = {
         'id': patient.id,
@@ -207,7 +214,7 @@ def get_critical_alerts():
             alerts.append({
                 'id': vital.id,
                 'patient_id': patient.id,
-                'patient_name': patient.full_name,
+                'patient_name': f"{patient.first_name} {patient.last_name}",
                 'patient_id_number': patient.patient_id,
                 'severity': vital.alert_severity,
                 'description': vital.alert_description,
@@ -255,7 +262,7 @@ def get_risk_assessment(patient_id):
         'age': patient.get_age(),
         'last_visit': last_encounter.visit_date.isoformat() if last_encounter and last_encounter.visit_date else None,
         'chronic_conditions': patient.chronic_conditions,
-        'visit_count_last_year': len([e for e in encounters if e.visit_date and (db.func.current_date() - db.func.date(e.visit_date)).days < 365]),
+        'visit_count_last_year': len([e for e in encounters if e.visit_date and (e.visit_date.date() if hasattr(e.visit_date, 'date') else e.visit_date) >= (datetime.utcnow() - timedelta(days=365)).date()]),
         'missed_appointments': 0,  # Would be calculated from appointment data
         'current_medications': patient.current_medications
     }
@@ -310,7 +317,7 @@ def batch_risk_assessment():
                 'age': patient.get_age(),
                 'last_visit': last_encounter.visit_date.isoformat() if last_encounter and last_encounter.visit_date else None,
                 'chronic_conditions': patient.chronic_conditions,
-                'visit_count_last_year': len(encounters),
+                'visit_count_last_year': len([e for e in encounters if e.visit_date and (e.visit_date.date() if hasattr(e.visit_date, 'date') else e.visit_date) >= (datetime.utcnow() - timedelta(days=365)).date()]),
                 'missed_appointments': 0,
                 'current_medications': patient.current_medications
             }

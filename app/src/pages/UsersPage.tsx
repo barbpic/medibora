@@ -13,7 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, UserPlus, Edit, User, Trash2, Save, X } from 'lucide-react';
+import { Loader2, UserPlus, Edit, User, Save } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -56,8 +56,8 @@ export default function UsersPage() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: async (userData: typeof newUser) => {
-      const response = await usersApi.create(userData);
+    mutationFn: async (userData: Partial<UserType>) => {
+      const response = await usersApi.create(userData as any);
       return response.data;
     },
     onSuccess: () => {
@@ -83,7 +83,7 @@ export default function UsersPage() {
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, userData }: { id: string; userData: Partial<UserType> }) => {
-      const response = await usersApi.update(id, userData);
+      const response = await usersApi.update(Number(id), userData);
       return response.data;
     },
     onSuccess: () => {
@@ -102,7 +102,7 @@ export default function UsersPage() {
       toast.error('Please fill in all required fields');
       return;
     }
-    createUserMutation.mutate(newUser);
+    createUserMutation.mutate(newUser as any);
   };
 
   const handleEditUser = (user: UserType) => {
@@ -123,7 +123,7 @@ export default function UsersPage() {
       is_active: editingUser.is_active,
     };
     
-    updateUserMutation.mutate({ id: editingUser.id, userData });
+    updateUserMutation.mutate({ id: String(editingUser.id), userData });
   };
 
   const handleCreateUserChange = (field: string, value: any) => {

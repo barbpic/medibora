@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { patientsApi, encountersApi } from '@/services/api';
+import { patientsApi, encountersApi, clinicalApi } from '@/services/api';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,21 +24,27 @@ import {
 import type { Patient } from '@/types';
 
 // Mock chart component - in production would use recharts or similar
-const VitalChart = ({ data, color }: { data: number[]; color: string }) => (
-  <div className="h-32 flex items-end gap-1">
-    {data.map((value, i) => (
-      <div
-        key={i}
-        className="flex-1 rounded-t"
-        style={{ 
-          height: `${(value / Math.max(...data)) * 100}%`,
-          backgroundColor: color,
-          opacity: 0.7 + (i / data.length) * 0.3
-        }}
-      />
-    ))}
-  </div>
-);
+const VitalChart = ({ data, color }: { data: number[]; color: string }) => {
+  const validData = data.filter(v => !isNaN(v) && v > 0);
+  if (validData.length === 0) {
+    return <div className="h-32 flex items-center justify-center text-gray-400 text-sm">No data available</div>;
+  }
+  return (
+    <div className="h-32 flex items-end gap-1">
+      {data.map((value, i) => (
+        <div
+          key={i}
+          className="flex-1 rounded-t"
+          style={{ 
+            height: `${(value / Math.max(...validData)) * 100}%`,
+            backgroundColor: color,
+            opacity: 0.7 + (i / data.length) * 0.3
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 
 export default function VitalSignsPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,21 +67,34 @@ export default function VitalSignsPage() {
     },
   });
 
-  // Mock vital history data
-  const vitalHistory = [
-    { date: '2025-03-17 08:00', bp: '120/80', hr: 72, temp: 36.8, rr: 16, spo2: 98, weight: 75, height: 170 },
-    { date: '2025-03-16 08:00', bp: '118/78', hr: 70, temp: 36.6, rr: 15, spo2: 99, weight: 75, height: 170 },
-    { date: '2025-03-15 08:00', bp: '122/82', hr: 74, temp: 36.9, rr: 17, spo2: 97, weight: 75.2, height: 170 },
-    { date: '2025-03-14 08:00', bp: '125/85', hr: 76, temp: 37.1, rr: 18, spo2: 96, weight: 75.5, height: 170 },
-    { date: '2025-03-13 08:00', bp: '119/79', hr: 71, temp: 36.7, rr: 16, spo2: 98, weight: 75.1, height: 170 },
-    { date: '2025-03-12 08:00', bp: '121/81', hr: 73, temp: 36.8, rr: 17, spo2: 98, weight: 75, height: 170 },
-    { date: '2025-03-11 08:00', bp: '123/83', hr: 75, temp: 37.0, rr: 18, spo2: 97, weight: 75.3, height: 170 },
-  ];
+  const { data: vitalsData } = useQuery({
+    queryKey: ['vitals', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getVitalSigns(patientId);
+      return response.data.vital_signs as any[];
+    },
+    enabled: !!patientId,
+  });
 
-  const latestVitals = vitalHistory[0];
+  const vitalHistory = vitalsData && vitalsData.length > 0 
+    ? vitalsData.map((v: any) => ({
+        date: v.recorded_at?.replace('T', ' ').substring(0, 16) || '',
+        bp: v.blood_pressure_systolic ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` : '--',
+        hr: v.heart_rate || '--',
+        temp: v.temperature || '--',
+        rr: v.respiratory_rate || '--',
+        spo2: v.oxygen_saturation || '--',
+        weight: v.weight,
+        height: v.height || 170,
+      }))
+    : [];
+
+  const latestVitals = vitalHistory.length > 0 ? vitalHistory[0] : { bp: '--', hr: '--', temp: '--', rr: '--', spo2: '--', weight: 0, height: 170 };
 
   // Calculate BMI
-  const bmi = latestVitals.weight / ((latestVitals.height / 100) ** 2);
+  const bmi = (latestVitals?.weight && latestVitals?.height) 
+    ? latestVitals.weight / ((latestVitals.height / 100) ** 2) 
+    : 0;
   
   // Determine BMI category
   const getBMICategory = (bmi: number) => {
@@ -139,7 +158,7 @@ export default function VitalSignsPage() {
                 <Activity className="h-5 w-5 text-blue-600" />
                 <span className="text-sm text-gray-500">Blood Pressure</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.bp}</p>
+              <p className="text-2xl font-bold">{latestVitals?.bp || '--'}</p>
               <p className="text-xs text-gray-400">mmHg</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -154,7 +173,7 @@ export default function VitalSignsPage() {
                 <Heart className="h-5 w-5 text-red-500" />
                 <span className="text-sm text-gray-500">Heart Rate</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.hr}</p>
+              <p className="text-2xl font-bold">{latestVitals?.hr || '--'}</p>
               <p className="text-xs text-gray-400">bpm</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -169,7 +188,7 @@ export default function VitalSignsPage() {
                 <Thermometer className="h-5 w-5 text-orange-500" />
                 <span className="text-sm text-gray-500">Temperature</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.temp}°C</p>
+              <p className="text-2xl font-bold">{latestVitals?.temp !== '--' ? `${latestVitals?.temp}°C` : '--'}</p>
               <p className="text-xs text-gray-400">Celsius</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -184,7 +203,7 @@ export default function VitalSignsPage() {
                 <Wind className="h-5 w-5 text-green-500" />
                 <span className="text-sm text-gray-500">Respiratory Rate</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.rr}</p>
+              <p className="text-2xl font-bold">{latestVitals?.rr || '--'}</p>
               <p className="text-xs text-gray-400">breaths/min</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -199,7 +218,7 @@ export default function VitalSignsPage() {
                 <Droplets className="h-5 w-5 text-cyan-500" />
                 <span className="text-sm text-gray-500">SpO2</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.spo2}%</p>
+              <p className="text-2xl font-bold">{latestVitals?.spo2 ? `${latestVitals.spo2}%` : '--'}</p>
               <p className="text-xs text-gray-400">Oxygen saturation</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingUp className="h-4 w-4" />
@@ -214,7 +233,7 @@ export default function VitalSignsPage() {
                 <Weight className="h-5 w-5 text-purple-500" />
                 <span className="text-sm text-gray-500">Weight</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals.weight}</p>
+              <p className="text-2xl font-bold">{latestVitals?.weight || '--'}</p>
               <p className="text-xs text-gray-400">kg</p>
               <div className="mt-2 flex items-center gap-1 text-gray-500 text-sm">
                 <span>Stable</span>
@@ -238,11 +257,11 @@ export default function VitalSignsPage() {
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-gray-500">Height</p>
-                    <p className="text-xl font-bold">{latestVitals.height} cm</p>
+                    <p className="text-xl font-bold">{latestVitals?.height || 170} cm</p>
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">Weight</p>
-                    <p className="text-xl font-bold">{latestVitals.weight} kg</p>
+                    <p className="text-xl font-bold">{latestVitals?.weight || '--'} kg</p>
                   </div>
                 </div>
                 <div className="border-t pt-4">
@@ -273,7 +292,7 @@ export default function VitalSignsPage() {
             </CardHeader>
             <CardContent>
               <VitalChart 
-                data={vitalHistory.map(v => parseInt(v.bp.split('/')[0]))} 
+                data={vitalHistory.length > 0 && vitalHistory[0].bp !== '--' ? vitalHistory.map(v => parseInt(v.bp.split('/')[0])) : [120, 118, 122, 125, 119, 121, 123]} 
                 color="#3b82f6" 
               />
               <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -297,7 +316,7 @@ export default function VitalSignsPage() {
             </CardHeader>
             <CardContent>
               <VitalChart 
-                data={vitalHistory.map(v => v.hr)} 
+                data={vitalHistory.length > 0 && vitalHistory[0].hr !== '--' ? vitalHistory.map(v => parseInt(v.hr) || 0) : [72, 70, 74, 76, 71, 73, 75]} 
                 color="#ef4444" 
               />
               <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -338,20 +357,26 @@ export default function VitalSignsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {vitalHistory.map((record, index) => (
+                  {vitalHistory.length > 0 ? vitalHistory.map((record, index) => (
                     <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4 text-sm">{record.date}</td>
+                      <td className="py-3 px-4 text-sm">{record.date || 'N/A'}</td>
                       <td className="py-3 px-4 text-sm text-center font-medium">{record.bp}</td>
                       <td className="py-3 px-4 text-sm text-center">{record.hr}</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.temp}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.temp !== '--' ? `${record.temp}°C` : '--'}</td>
                       <td className="py-3 px-4 text-sm text-center">{record.rr}</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.spo2}%</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.weight}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.spo2 !== '--' ? `${record.spo2}%` : '--'}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.weight || '--'}</td>
                       <td className="py-3 px-4 text-center">
                         <Badge className="bg-green-100 text-green-800">Normal</Badge>
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-gray-500">
+                        No vital signs recorded yet. Click "Record Vitals" to add the first record.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

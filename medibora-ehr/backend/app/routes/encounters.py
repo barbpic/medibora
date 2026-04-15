@@ -132,6 +132,11 @@ def create_encounter():
     # Add vital signs if provided
     if 'vital_signs' in data:
         vs_data = data['vital_signs']
+        
+        # Handle both flat and nested blood pressure formats
+        bp_systolic = vs_data.get('blood_pressure_systolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('systolic'))
+        bp_diastolic = vs_data.get('blood_pressure_diastolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('diastolic'))
+        
         vital_signs = VitalSigns(
             patient_id=data['patient_id'],
             encounter_id=encounter.id,
@@ -140,8 +145,8 @@ def create_encounter():
             temperature_site=vs_data.get('temperature_site'),
             heart_rate=vs_data.get('heart_rate'),
             respiratory_rate=vs_data.get('respiratory_rate'),
-            blood_pressure_systolic=vs_data.get('blood_pressure_systolic'),
-            blood_pressure_diastolic=vs_data.get('blood_pressure_diastolic'),
+            blood_pressure_systolic=bp_systolic,
+            blood_pressure_diastolic=bp_diastolic,
             oxygen_saturation=vs_data.get('oxygen_saturation'),
             weight=vs_data.get('weight'),
             height=vs_data.get('height'),
@@ -225,10 +230,15 @@ def update_encounter(encounter_id):
             vital_signs.heart_rate = vs_data['heart_rate']
         if 'respiratory_rate' in vs_data:
             vital_signs.respiratory_rate = vs_data['respiratory_rate']
-        if 'blood_pressure_systolic' in vs_data:
-            vital_signs.blood_pressure_systolic = vs_data['blood_pressure_systolic']
-        if 'blood_pressure_diastolic' in vs_data:
-            vital_signs.blood_pressure_diastolic = vs_data['blood_pressure_diastolic']
+        
+        # Handle both flat and nested blood pressure formats
+        bp_systolic = vs_data.get('blood_pressure_systolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('systolic'))
+        bp_diastolic = vs_data.get('blood_pressure_diastolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('diastolic'))
+        if bp_systolic:
+            vital_signs.blood_pressure_systolic = bp_systolic
+        if bp_diastolic:
+            vital_signs.blood_pressure_diastolic = bp_diastolic
+            
         if 'oxygen_saturation' in vs_data:
             vital_signs.oxygen_saturation = vs_data['oxygen_saturation']
         if 'weight' in vs_data:

@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Layout from '@/components/Layout';
+import { patientsApi, aiApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,36 +22,102 @@ import { toast } from 'sonner';
 
 export default function InteroperabilityPage() {
   const [copied, setCopied] = useState(false);
-  const [fhirData, setFhirData] = useState<any>(null);
-  const [hl7Data, setHl7Data] = useState<string>('');
-  const [, setSelectedPatient] = useState<number | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  const [fhirExportData, setFhirExportData] = useState<any>(null);
+  const [hl7ExportData, setHl7ExportData] = useState<string>('');
 
-  const handleExportFHIR = async (patientId: number) => {
+  // Fetch patients list
+  const { data: patientsData } = useQuery({
+    queryKey: ['patients'],
+    queryFn: async () => {
+      const response = await patientsApi.getAll({ per_page: 100 });
+      return response.data.patients || [];
+    },
+  });
+
+  // FHIR Export mutation
+  const { data: fhirData, isFetching: isFhirFetching, refetch: exportFhir } = useQuery({
+    queryKey: ['exportFHIR', selectedPatientId],
+    queryFn: async () => {
+      if (!selectedPatientId) return null;
+      const response = await aiApi.exportFHIR(selectedPatientId);
+      return response.data.data;
+    },
+    enabled: false,
+  });
+
+  // HL7 Export mutation  
+  const { data: hl7Data, isFetching: isHl7Fetching, refetch: exportHl7 } = useQuery({
+    queryKey: ['exportHL7', selectedPatientId],
+    queryFn: async () => {
+      if (!selectedPatientId) return null;
+      const response = await aiApi.exportHL7(selectedPatientId);
+      return response.data.message;
+    },
+    enabled: false,
+  });
+
+  // FHIR Bundle Export
+  const { refetch: exportBundle } = useQuery({
+    queryKey: ['exportFHIRBundle', selectedPatientId],
+    queryFn: async () => {
+      if (!selectedPatientId) return null;
+      const response = await aiApi.exportFHIRBundle(selectedPatientId);
+      return response.data.data;
+    },
+    enabled: false,
+  });
+
+  const handleExportFHIR = async () => {
+    if (!selectedPatientId) {
+      toast.error('Please select a patient');
+      return;
+    }
     try {
-      const response = await fetch(`/api/ai/export/fhir/patient/${patientId}`);
-      const data = await response.json();
-      setFhirData(data.data);
-      setSelectedPatient(patientId);
-      toast.success('FHIR data exported successfully');
+      const result = await exportFhir();
+      if (result.data) {
+        setFhirExportData(result.data);
+        toast.success('FHIR data exported successfully');
+      }
     } catch (error) {
       toast.error('Failed to export FHIR data');
     }
   };
 
-  const handleExportHL7 = async (patientId: number) => {
+  const handleExportHL7 = async () => {
+    if (!selectedPatientId) {
+      toast.error('Please select a patient');
+      return;
+    }
     try {
-      const response = await fetch(`/api/ai/export/hl7/patient/${patientId}`);
-      const data = await response.json();
-      setHl7Data(data.message);
-      setSelectedPatient(patientId);
-      toast.success('HL7 data exported successfully');
+      const result = await exportHl7();
+      if (result.data) {
+        setHl7ExportData(result.data);
+        toast.success('HL7 data exported successfully');
+      }
     } catch (error) {
       toast.error('Failed to export HL7 data');
     }
   };
 
+  const handleExportBundle = async () => {
+    if (!selectedPatientId) {
+      toast.error('Please select a patient');
+      return;
+    }
+    try {
+      const result = await exportBundle();
+      if (result.data) {
+        setFhirExportData(result.data);
+        toast.success('FHIR Bundle exported successfully');
+      }
+    } catch (error) {
+      toast.error('Failed to export FHIR Bundle');
+    }
+  };
+
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(typeof text === 'string' ? text : JSON.stringify(text, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     toast.success('Copied to clipboard');
@@ -160,36 +228,46 @@ export default function InteroperabilityPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-3">
-                  <select className="flex-1 border border-gray-200 rounded-lg px-3 py-2">
+                  <select 
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2"
+                    value={selectedPatientId || ''}
+                    onChange={(e) => {
+                      setSelectedPatientId(e.target.value ? parseInt(e.target.value) : null);
+                      setFhirExportData(null);
+                    }}
+                  >
                     <option value="">Select a patient...</option>
-                    <option value="1">Nyakundi, Barbra (MED25001)</option>
-                    <option value="2">Odhiambo, Samuel (MED25002)</option>
-                    <option value="3">Hassan, Fatuma (MED25003)</option>
+                    {patientsData?.map((patient: any) => (
+                      <option key={patient.id} value={patient.id}>
+                        {patient.full_name} ({patient.patient_id})
+                      </option>
+                    ))}
                   </select>
                   <Button 
                     className="bg-blue-600 hover:bg-blue-700"
-                    onClick={() => handleExportFHIR(1)}
+                    onClick={handleExportFHIR}
+                    disabled={isFhirFetching || !selectedPatientId}
                   >
                     <Download className="h-4 w-4 mr-2" />
-                    Export FHIR
+                    {isFhirFetching ? 'Exporting...' : 'Export FHIR'}
                   </Button>
                 </div>
 
-                {fhirData && (
+                {fhirExportData && (
                   <div className="mt-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium text-gray-700">FHIR JSON Output</span>
                       <Button 
                         variant="outline" 
                         size="sm"
-                        onClick={() => handleCopy(JSON.stringify(fhirData, null, 2))}
+                        onClick={() => handleCopy(fhirExportData)}
                       >
                         {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
                         Copy
                       </Button>
                     </div>
                     <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-auto max-h-96 text-sm">
-                      {JSON.stringify(fhirData, null, 2)}
+                      {JSON.stringify(fhirExportData, null, 2)}
                     </pre>
                   </div>
                 )}
@@ -207,7 +285,12 @@ export default function InteroperabilityPage() {
                 <p className="text-sm text-gray-600 mb-4">
                   Export complete patient summary including encounters, vital signs, and conditions as a FHIR Bundle.
                 </p>
-                <Button variant="outline" className="w-full">
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={handleExportBundle}
+                  disabled={!selectedPatientId}
+                >
                   <Share2 className="h-4 w-4 mr-2" />
                   Export Complete Bundle
                 </Button>
@@ -225,36 +308,46 @@ export default function InteroperabilityPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-3">
-                  <select className="flex-1 border border-gray-200 rounded-lg px-3 py-2">
+                  <select 
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2"
+                    value={selectedPatientId || ''}
+                    onChange={(e) => {
+                      setSelectedPatientId(e.target.value ? parseInt(e.target.value) : null);
+                      setHl7ExportData('');
+                    }}
+                  >
                     <option value="">Select a patient...</option>
-                    <option value="1">Nyakundi, Barbra (MED25001)</option>
-                    <option value="2">Odhiambo, Samuel (MED25002)</option>
-                    <option value="3">Hassan, Fatuma (MED25003)</option>
+                    {patientsData?.map((patient: any) => (
+                      <option key={patient.id} value={patient.id}>
+                        {patient.full_name} ({patient.patient_id})
+                      </option>
+                    ))}
                   </select>
                   <Button 
                     className="bg-green-600 hover:bg-green-700"
-                    onClick={() => handleExportHL7(1)}
+                    onClick={handleExportHL7}
+                    disabled={isHl7Fetching || !selectedPatientId}
                   >
                     <Download className="h-4 w-4 mr-2" />
-                    Export HL7
+                    {isHl7Fetching ? 'Exporting...' : 'Export HL7'}
                   </Button>
                 </div>
 
-                {hl7Data && (
+                {hl7ExportData && (
                   <div className="mt-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium text-gray-700">HL7 Message</span>
                       <Button 
                         variant="outline" 
                         size="sm"
-                        onClick={() => handleCopy(hl7Data)}
+                        onClick={() => handleCopy(hl7ExportData)}
                       >
                         {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
                         Copy
                       </Button>
                     </div>
                     <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto max-h-96 text-sm font-mono">
-                      {hl7Data}
+                      {hl7ExportData}
                     </pre>
                   </div>
                 )}

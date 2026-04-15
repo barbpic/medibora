@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { aiApi } from '@/services/api';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +41,17 @@ export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const { data: alertsData } = useQuery({
+    queryKey: ['alertCount'],
+    queryFn: async () => {
+      const response = await aiApi.getAlerts();
+      return response.data as { total: number };
+    },
+    refetchInterval: 30000,
+  });
+
+  const alertCount = alertsData?.total || 0;
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -53,10 +66,17 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Patient Directory', href: '/patients', icon: Users },
     { name: 'Encounters', href: '/encounters', icon: FileText },
-    { name: 'Alerts', href: '/alerts', icon: AlertTriangle, badge: 2 },
+    { name: 'Alerts', href: '/alerts', icon: AlertTriangle, badge: alertCount > 0 ? alertCount : undefined },
     { name: 'Smart Search', href: '/search', icon: Search },
     { name: 'Interoperability', href: '/interoperability', icon: Globe },
   ];
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/patients?search=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
 
   const adminNavigation = [
     { name: 'Users', href: '/users', icon: UserCircle },
@@ -80,16 +100,18 @@ export default function Layout({ children }: LayoutProps) {
         
         {/* Search Bar */}
         <div className="flex-1 max-w-lg mx-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Patient search... (Name, ID, NHIF)"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 h-9 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <form onSubmit={handleSearch}>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Patient search... (Name, ID, County, Symptoms)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 h-9 border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </form>
         </div>
 
         {/* Right Actions */}

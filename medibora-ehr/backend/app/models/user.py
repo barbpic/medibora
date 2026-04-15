@@ -32,13 +32,56 @@ class User(db.Model):
     
     def has_permission(self, permission):
         role_permissions = {
-            'admin': ['all'],
-            'doctor': ['view_patient', 'edit_patient', 'create_encounter', 'edit_encounter', 'view_all_records', 'ai_features'],
-            'nurse': ['view_patient', 'edit_patient', 'create_encounter', 'view_assigned_records', 'vitals'],
-            'records_officer': ['view_patient', 'edit_patient', 'register_patient', 'view_demographics']
+            'admin': [
+                'all', 'view_patient', 'register_patient', 'edit_patient', 'delete_patient',
+                'view_all_patients', 'view_assigned_patients',
+                'create_encounter', 'edit_encounter', 'view_encounter',
+                'view_all_records', 'view_assigned_records',
+                'view_vitals', 'record_vitals',
+                'view_diagnoses', 'write_diagnoses',
+                'view_prescriptions', 'write_prescriptions',
+                'ai_features', 'ai_alerts', 'ai_risk_assessment', 'ai_diagnosis_suggestions',
+                'export_fhir', 'export_reports',
+                'view_audit_logs', 'manage_users',
+                'view_counters', 'view_ai_dashboard'
+            ],
+            'doctor': [
+                'view_patient', 'register_patient', 'edit_patient',
+                'view_all_patients', 'view_assigned_patients',
+                'create_encounter', 'edit_encounter', 'view_encounter',
+                'view_all_records', 'view_assigned_records',
+                'view_vitals', 'record_vitals',
+                'view_diagnoses', 'write_diagnoses',
+                'view_prescriptions', 'write_prescriptions',
+                'ai_features', 'ai_alerts', 'ai_risk_assessment', 'ai_diagnosis_suggestions',
+                'export_fhir', 'export_reports',
+                'view_audit_logs'
+            ],
+            'nurse': [
+                'view_patient', 'register_patient', 'edit_patient',
+                'view_assigned_patients',
+                'create_encounter', 'view_encounter',
+                'view_assigned_records',
+                'view_vitals', 'record_vitals',
+                'view_diagnoses',
+                'view_prescriptions',
+                'ai_alerts', 'send_appointment_email'
+            ],
+            'records_officer': [
+                'view_patient', 'register_patient',
+                'view_all_patients', 'view_assigned_patients',
+                'view_encounter', 'view_all_records',
+                'view_vitals', 'view_diagnoses', 'view_prescriptions',
+                'export_fhir', 'export_reports',
+                'view_counters', 'view_ai_dashboard'
+            ]
         }
         permissions = role_permissions.get(self.role, [])
         return 'all' in permissions or permission in permissions
+    
+    def can_access_problems_diagnoses(self):
+        """Check if user can access problems and diagnoses - not allowed for nurse/records_officer roles"""
+        return self.role in ['admin', 'doctor']
     
     def to_dict(self):
         return {

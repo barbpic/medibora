@@ -26,6 +26,7 @@ def create_app(config_class=Config):
     from app.routes.users import users_bp
     from app.routes.ai import ai_bp
     from app.routes.audit import audit_bp
+    from app.routes.clinical import clinical_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(patients_bp, url_prefix='/api/patients')
@@ -33,6 +34,7 @@ def create_app(config_class=Config):
     app.register_blueprint(users_bp, url_prefix='/api/users')
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
     app.register_blueprint(audit_bp, url_prefix='/api/audit')
+    app.register_blueprint(clinical_bp, url_prefix='/api/clinical')
     
     # Create database tables
     with app.app_context():

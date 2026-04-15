@@ -37,13 +37,14 @@ function App() {
           <Router>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/" element={<Navigate to="/login" replace />} />
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/patients" element={<ProtectedRoute><PatientsDirectory /></ProtectedRoute>} />
               <Route path="/patients/:id" element={<ProtectedRoute><PatientDetailPage /></ProtectedRoute>} />
               <Route path="/patients/:id/chart" element={<ProtectedRoute><PatientChart /></ProtectedRoute>} />
               <Route path="/patients/:id/vitals" element={<ProtectedRoute><VitalSignsPage /></ProtectedRoute>} />
               <Route path="/patients/:id/new-encounter" element={<ProtectedRoute><NewEncounterPage /></ProtectedRoute>} />
+              <Route path="/patients/:id/encounters/:encounterId/edit" element={<ProtectedRoute><NewEncounterPage /></ProtectedRoute>} />
               <Route path="/interoperability" element={<ProtectedRoute><InteroperabilityPage /></ProtectedRoute>} />
               <Route path="/encounters" element={<ProtectedRoute><EncountersPage /></ProtectedRoute>} />
               <Route path="/encounters/:id" element={<ProtectedRoute><EncounterDetailPage /></ProtectedRoute>} />

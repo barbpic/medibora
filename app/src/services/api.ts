@@ -66,6 +66,49 @@ export const encountersApi = {
   getPatientHistory: (patientId: number) => api.get(`/encounters/patient/${patientId}/history`),
 };
 
+// Clinical Data API
+export const clinicalApi = {
+  getAllergies: (patientId: number) => api.get(`/clinical/${patientId}/allergies`),
+  createAllergy: (patientId: number, data: any) => api.post(`/clinical/${patientId}/allergies`, data),
+  
+  getProblems: (patientId: number) => api.get(`/clinical/${patientId}/problems`),
+  createProblem: (patientId: number, data: any) => api.post(`/clinical/${patientId}/problems`, data),
+  
+  getMedications: (patientId: number) => api.get(`/clinical/${patientId}/medications`),
+  createMedication: (patientId: number, data: any) => api.post(`/clinical/${patientId}/medications`, data),
+  
+  getHistories: (patientId: number) => api.get(`/clinical/${patientId}/histories`),
+  createHistory: (patientId: number, data: any) => api.post(`/clinical/${patientId}/histories`, data),
+  
+  getImmunizations: (patientId: number) => api.get(`/clinical/${patientId}/immunizations`),
+  createImmunization: (patientId: number, data: any) => api.post(`/clinical/${patientId}/immunizations`, data),
+  
+  getAppointments: (patientId: number) => api.get(`/clinical/${patientId}/appointments`),
+  createAppointment: (patientId: number, data: any) => api.post(`/clinical/${patientId}/appointments`, data),
+  
+  getLabResults: (patientId: number) => api.get(`/clinical/${patientId}/results`),
+  createLabResult: (patientId: number, data: any) => api.post(`/clinical/${patientId}/results`, data),
+  
+  getAdmissions: (patientId: number) => api.get(`/clinical/${patientId}/admissions`),
+  createAdmission: (patientId: number, data: any) => api.post(`/clinical/${patientId}/admissions`, data),
+  
+  getVitalSigns: (patientId: number) => api.get(`/clinical/${patientId}/vitals`),
+  createVitalSigns: (patientId: number, data: any) => api.post(`/clinical/${patientId}/vitals`, data),
+  
+  getSBARs: (patientId: number) => api.get(`/clinical/${patientId}/sbar`),
+  createSBAR: (patientId: number, data: any) => api.post(`/clinical/${patientId}/sbar`, data),
+  
+  getDocuments: (patientId: number) => api.get(`/clinical/${patientId}/documents`),
+  createDocument: (patientId: number, data: any) => api.post(`/clinical/${patientId}/documents`, data),
+  
+  getTasks: (patientId: number) => api.get(`/clinical/${patientId}/tasks`),
+  createTask: (patientId: number, data: any) => api.post(`/clinical/${patientId}/tasks`, data),
+  updateTask: (patientId: number, taskId: number, data: any) => api.put(`/clinical/${patientId}/tasks/${taskId}`, data),
+  
+  getReports: (patientId: number) => api.get(`/clinical/${patientId}/reports`),
+  createReport: (patientId: number, data: any) => api.post(`/clinical/${patientId}/reports`, data),
+};
+
 // AI API
 export const aiApi = {
   search: (query: string) => api.get('/ai/search', { params: { q: query } }),
@@ -74,6 +117,9 @@ export const aiApi = {
   getDiagnosisSuggestions: (symptoms: string[]) =>
     api.post('/ai/suggestions/diagnosis', { symptoms }),
   getDashboardStats: () => api.get('/ai/dashboard/stats'),
+  exportFHIR: (patientId: number) => api.get(`/ai/export/fhir/patient/${patientId}`),
+  exportHL7: (patientId: number) => api.get(`/ai/export/hl7/patient/${patientId}`),
+  exportFHIRBundle: (patientId: number) => api.get(`/ai/export/fhir/bundle/${patientId}`),
 };
 
 // Users API

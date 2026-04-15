@@ -26,13 +26,43 @@ export default function PatientDetailPage() {
   const patientId = parseInt(id || '0');
   const [activeTab, setActiveTab] = useState('overview');
 
-  const { data: patient, isLoading: patientLoading } = useQuery({
+  // Add error handling for invalid patient ID
+  if (!id || isNaN(patientId) || patientId === 0) {
+    return (
+      <Layout>
+        <div className="text-center py-12">
+          <h2 className="text-2xl font-bold text-gray-900">Invalid Patient ID</h2>
+          <p className="text-gray-500 mt-2">Please select a valid patient from the directory.</p>
+          <Button asChild className="mt-4">
+            <Link to="/patients">Back to Patients</Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
+
+  const { data: patient, isLoading: patientLoading, error: patientError } = useQuery({
     queryKey: ['patient', patientId],
     queryFn: async () => {
       const response = await patientsApi.getById(patientId);
       return response.data.patient as Patient;
     },
+    retry: 1,
   });
+
+  if (patientError) {
+    return (
+      <Layout>
+        <div className="text-center py-12">
+          <h2 className="text-2xl font-bold text-gray-900">Error Loading Patient</h2>
+          <p className="text-gray-500 mt-2">{patientError.message || 'Patient not found'}</p>
+          <Button asChild className="mt-4">
+            <Link to="/patients">Back to Patients</Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
 
   const { data: history, isLoading: historyLoading } = useQuery({
     queryKey: ['patientHistory', patientId],
@@ -406,11 +436,12 @@ export default function PatientDetailPage() {
                     </div>
 
                     {/* Risk Factors */}
-                    {riskAssessment.risk_factors.length > 0 && (
+                    {(riskAssessment.risk_factors?.length ?? 0) > 0 && (
+
                       <div>
                         <h4 className="font-semibold text-gray-900 mb-3">Identified Risk Factors</h4>
                         <div className="space-y-2">
-                          {riskAssessment.risk_factors.map((factor: string, index: number) => (
+                          {riskAssessment.risk_factors?.map((factor: string, index: number) => (
                             <div
                               key={index}
                               className="flex items-center gap-2 p-3 bg-red-50 rounded-lg"
@@ -424,11 +455,11 @@ export default function PatientDetailPage() {
                     )}
 
                     {/* Recommendations */}
-                    {riskAssessment.recommendations.length > 0 && (
+                    {(riskAssessment.recommendations?.length ?? 0) > 0 && (
                       <div>
                         <h4 className="font-semibold text-gray-900 mb-3">AI Recommendations</h4>
                         <div className="space-y-2">
-                          {riskAssessment.recommendations.map((rec: string, index: number) => (
+                          {riskAssessment.recommendations?.map((rec: string, index: number) => (
                             <div
                               key={index}
                               className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg"

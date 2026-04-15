@@ -1,5 +1,56 @@
 from datetime import datetime, timedelta
 
+"""
+AI-Powered Risk Assessment for MEDIBORA EHR System
+
+This module provides comprehensive risk assessment for patients by analyzing:
+- Vital signs (blood pressure, heart rate, temperature, oxygen saturation, BMI)
+- Chronic conditions
+- Encounter history and frequency
+- Patient demographics (age)
+
+USAGE:
+------
+1. Import and initialize:
+   from app.ai.risk_assessment import RiskAssessment
+   risk_assessment = RiskAssessment()
+
+2. Call assess_patient_risk() with patient data:
+   result = risk_assessment.assess_patient_risk(
+       patient=patient_object,      # Patient model instance
+       vital_signs=vitals_object,   # VitalSigns model instance  
+       encounters=encounters_list   # List of Encounter model instances
+   )
+
+3. The result contains:
+   - risk_score: Numeric score (0-100+)
+   - risk_level: 'critical', 'high', 'moderate', or 'low'
+   - risk_factors: List of identified risk factors
+   - recommendations: List of clinical recommendations
+   - assessed_at: Timestamp of assessment
+
+4. Get quick suggestions for a patient:
+   suggestions = risk_assessment.get_clinical_suggestions(patient_id)
+   - Returns a dictionary with quick recommendations based on patient data
+   
+5. Batch assessment for multiple patients:
+   results = risk_assessment.batch_assess(patient_ids_list)
+   - Returns list of assessments for all patients
+
+Example API endpoint:
+   @ai_bp.route('/risk-assessment/<int:patient_id>', methods=['GET'])
+   @jwt_required()
+   def get_risk_assessment(patient_id):
+       patient = Patient.query.get(patient_id)
+       vitals = VitalSigns.query.filter_by(patient_id=patient_id).first()
+       encounters = Encounter.query.filter_by(patient_id=patient_id).all()
+       
+       risk_assessment = RiskAssessment()
+       result = risk_assessment.assess_patient_risk(patient, vitals, encounters)
+       
+       return jsonify(result)
+"""
+
 class RiskAssessment:
     """
     AI-powered risk assessment for patients.
@@ -209,3 +260,79 @@ class RiskAssessment:
                 'color': 'green',
                 'description': 'Low risk - Routine care'
             }
+
+    def get_clinical_suggestions(self, patient, vital_signs=None, encounters=None):
+        """
+        Get quick clinical suggestions for a patient based on available data.
+        
+        Args:
+            patient: Patient model instance
+            vital_signs: VitalSigns model instance (optional)
+            encounters: List of Encounter model instances (optional)
+            
+        Returns:
+            dict: Quick suggestions based on patient data
+        """
+        suggestions = {
+            'priority_actions': [],
+            'monitoring': [],
+            'lifestyle': [],
+            'follow_up': []
+        }
+        
+        # Age-based suggestions
+        age = patient.get_age()
+        if age >= 65:
+            suggestions['monitoring'].append('Consider geriatric assessment')
+            suggestions['priority_actions'].append('Review medication list for interactions')
+        
+        # Chronic conditions
+        if patient.chronic_conditions:
+            conditions = patient.chronic_conditions.lower()
+            if 'diabetes' in conditions:
+                suggestions['monitoring'].append('Check HbA1c; monitor blood glucose')
+                suggestions['follow_up'].append('Schedule diabetic eye examination')
+            if 'hypertension' in conditions:
+                suggestions['monitoring'].append('Monitor blood pressure regularly')
+                suggestions['lifestyle'].append('Reduce sodium intake; regular exercise')
+            if 'asthma' in conditions:
+                suggestions['monitoring'].append('Review inhaler technique; check peak flow')
+            if 'hiv' in conditions:
+                suggestions['monitoring'].append('Monitor CD4 count and viral load')
+        
+        # Vital signs suggestions
+        if vital_signs:
+            if vital_signs.blood_pressure_systolic and vital_signs.blood_pressure_systolic >= 140:
+                suggestions['priority_actions'].append('Review antihypertensive therapy')
+            if vital_signs.oxygen_saturation and vital_signs.oxygen_saturation < 92:
+                suggestions['priority_actions'].append('Assess respiratory status; consider oxygen')
+            if vital_signs.temperature and vital_signs.temperature > 38.5:
+                suggestions['priority_actions'].append('Investigate potential infection')
+        
+        return suggestions
+    
+    def batch_assess(self, patients_data):
+        """
+        Perform risk assessment for multiple patients.
+        
+        Args:
+            patients_data: List of dicts with patient, vital_signs, encounters keys
+            
+        Returns:
+            list: Risk assessment results for each patient
+        """
+        results = []
+        
+        for data in patients_data:
+            patient = data.get('patient')
+            vital_signs = data.get('vital_signs')
+            encounters = data.get('encounters', [])
+            
+            assessment = self.assess_patient_risk(patient, vital_signs, encounters)
+            results.append({
+                'patient_id': patient.id,
+                'patient_name': patient.full_name,
+                'assessment': assessment
+            })
+        
+        return results

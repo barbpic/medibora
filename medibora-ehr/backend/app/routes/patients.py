@@ -55,7 +55,12 @@ def get_patients():
                 Patient.first_name.ilike(f'%{search}%'),
                 Patient.last_name.ilike(f'%{search}%'),
                 Patient.patient_id.ilike(f'%{search}%'),
-                Patient.phone.ilike(f'%{search}%')
+                Patient.phone.ilike(f'%{search}%'),
+                Patient.county.ilike(f'%{search}%'),
+                Patient.city.ilike(f'%{search}%'),
+                Patient.allergies.ilike(f'%{search}%'),
+                Patient.chronic_conditions.ilike(f'%{search}%'),
+                Patient.email.ilike(f'%{search}%')
             )
         )
     
@@ -203,6 +208,39 @@ def update_patient(patient_id):
         'patient': patient.to_dict()
     }), 200
 
+@patients_bp.route('/<int:patient_id>/clinical', methods=['PUT'])
+@jwt_required()
+def update_patient_clinical(patient_id):
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    if not user.has_permission('edit_patient'):
+        log_action(current_user_id, 'update_patient_clinical', 'patient', str(patient_id), 'Permission denied', False)
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    patient = Patient.query.get(patient_id)
+    
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+    
+    data = request.get_json()
+    
+    if 'allergies' in data:
+        patient.allergies = data['allergies']
+    if 'chronic_conditions' in data:
+        patient.chronic_conditions = data['chronic_conditions']
+    if 'current_medications' in data:
+        patient.current_medications = data['current_medications']
+    
+    db.session.commit()
+    
+    log_action(current_user_id, 'update_patient_clinical', 'patient', str(patient_id), f'Updated clinical data for patient {patient.patient_id}')
+    
+    return jsonify({
+        'message': 'Patient clinical data updated successfully',
+        'patient': patient.to_dict()
+    }), 200
+
 @patients_bp.route('/<int:patient_id>', methods=['DELETE'])
 @jwt_required()
 def delete_patient(patient_id):
@@ -241,10 +279,14 @@ def search_patients():
                 Patient.first_name.ilike(f'%{query}%'),
                 Patient.last_name.ilike(f'%{query}%'),
                 Patient.patient_id.ilike(f'%{query}%'),
-                Patient.phone.ilike(f'%{query}%')
+                Patient.phone.ilike(f'%{query}%'),
+                Patient.county.ilike(f'%{query}%'),
+                Patient.city.ilike(f'%{query}%'),
+                Patient.allergies.ilike(f'%{query}%'),
+                Patient.chronic_conditions.ilike(f'%{query}%')
             )
         )
-    ).limit(10).all()
+    ).limit(20).all()
     
     log_action(current_user_id, 'search_patients', 'patient', details=f'Search query: {query}')
     

@@ -78,9 +78,11 @@ export default function EncounterDetailPage() {
               </p>
             </div>
           </div>
-          <Button variant="outline">
-            <Edit className="h-4 w-4 mr-2" />
-            Edit Encounter
+          <Button variant="outline" asChild>
+            <Link to={`/patients/${encounter.patient_id}/encounters/${encounterId}/edit`}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Encounter
+            </Link>
           </Button>
         </div>
 

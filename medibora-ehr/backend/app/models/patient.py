@@ -38,6 +38,9 @@ class Patient(db.Model):
         born = self.date_of_birth
         age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
         return age
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"
     
     def to_dict(self):
         return {

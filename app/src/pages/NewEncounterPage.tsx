@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { patientsApi, encountersApi } from '@/services/api';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
@@ -20,10 +20,13 @@ import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import type { Encounter } from '@/types';
 
 export default function NewEncounterPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id, encounterId } = useParams<{ id: string; encounterId?: string }>();
   const patientId = parseInt(id || '0');
+  const editEncounterId = encounterId ? parseInt(encounterId) : null;
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
+  const isEditMode = !!editEncounterId;
 
   const { data: patient } = useQuery({
     queryKey: ['patient', patientId],
@@ -33,8 +36,51 @@ export default function NewEncounterPage() {
     },
   });
 
+  // Fetch existing encounter for edit mode
+  const { data: existingEncounter } = useQuery({
+    queryKey: ['encounter', editEncounterId],
+    queryFn: async () => {
+      if (!editEncounterId) return null;
+      const response = await encountersApi.getById(editEncounterId);
+      return response.data.encounter as Encounter;
+    },
+    enabled: !!editEncounterId,
+  });
+
+  useEffect(() => {
+    if (existingEncounter && isEditMode) {
+      setFormData({
+        visit_type: existingEncounter.visit_type || 'follow_up',
+        chief_complaint: existingEncounter.chief_complaint || '',
+        history_of_present_illness: existingEncounter.history_of_present_illness || '',
+        physical_examination: existingEncounter.physical_examination || '',
+        assessment: existingEncounter.assessment || '',
+        diagnosis_primary: existingEncounter.diagnosis_primary || '',
+        diagnosis_secondary: existingEncounter.diagnosis_secondary || '',
+        treatment_plan: existingEncounter.treatment_plan || '',
+        medications_prescribed: existingEncounter.medications_prescribed || '',
+        procedures: existingEncounter.procedures || '',
+        lab_tests_ordered: existingEncounter.lab_tests_ordered || '',
+        follow_up_instructions: existingEncounter.follow_up_instructions || '',
+        follow_up_date: existingEncounter.follow_up_date || '',
+        vital_signs: {
+          temperature: existingEncounter.vital_signs?.temperature?.toString() || '',
+          temperature_site: existingEncounter.vital_signs?.temperature_site || 'oral',
+          heart_rate: existingEncounter.vital_signs?.heart_rate?.toString() || '',
+          respiratory_rate: existingEncounter.vital_signs?.respiratory_rate?.toString() || '',
+          blood_pressure_systolic: existingEncounter.vital_signs?.blood_pressure?.systolic?.toString() || '',
+          blood_pressure_diastolic: existingEncounter.vital_signs?.blood_pressure?.diastolic?.toString() || '',
+          oxygen_saturation: existingEncounter.vital_signs?.oxygen_saturation?.toString() || '',
+          weight: existingEncounter.vital_signs?.weight?.toString() || '',
+          height: existingEncounter.vital_signs?.height?.toString() || '',
+          pain_score: existingEncounter.vital_signs?.pain_score?.toString() || '',
+        },
+      });
+    }
+  }, [existingEncounter, isEditMode]);
+
   const [formData, setFormData] = useState({
-    visit_type: 'outpatient',
+    visit_type: 'follow_up',
     chief_complaint: '',
     history_of_present_illness: '',
     physical_examination: '',
@@ -126,11 +172,19 @@ export default function NewEncounterPage() {
         } as any,
       };
 
-      const response = await encountersApi.create(encounterData);
-      toast.success('Encounter created successfully');
-      navigate(`/encounters/${response.data.encounter.id}`);
+      if (isEditMode && editEncounterId) {
+        await encountersApi.update(editEncounterId, encounterData);
+        toast.success('Encounter updated successfully');
+        queryClient.invalidateQueries({ queryKey: ['encounter', editEncounterId] });
+        queryClient.invalidateQueries({ queryKey: ['patientHistory', patientId] });
+      } else {
+        const response = await encountersApi.create(encounterData);
+        toast.success('Encounter created successfully');
+        queryClient.invalidateQueries({ queryKey: ['patientHistory', patientId] });
+        navigate(`/encounters/${response.data.encounter.id}`);
+      }
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to create encounter';
+      const message = error.response?.data?.error || (isEditMode ? 'Failed to update encounter' : 'Failed to create encounter');
       toast.error(message);
     } finally {
       setIsLoading(false);

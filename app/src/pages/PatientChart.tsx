@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { patientsApi, encountersApi, aiApi } from '@/services/api';
+import { useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { patientsApi, encountersApi, aiApi, clinicalApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -24,6 +25,7 @@ import {
   FileBarChart,
   FileText,
   History,
+  Loader2,
   MessageSquare,
   Pill,
   Search,
@@ -43,71 +45,81 @@ import {
 } from 'lucide-react';
 import type { Patient, Encounter } from '@/types';
 
-// Clinical Menu Items - Complete list from document
-const clinicalMenuItems = [
-  { id: 'sbar', label: 'SBAR', icon: MessageSquare },
-  { id: 'inpatient', label: 'Inpatient Summaries', icon: BedDouble },
-  { id: 'demographics', label: 'Demographics', icon: User },
-  { id: 'allergies', label: 'Allergies', icon: AlertTriangle, badge: 1 },
-  { id: 'problems', label: 'Problems and Diagnoses', icon: Stethoscope },
-  { id: 'medications', label: 'Medication List', icon: Pill },
-  { id: 'vitals', label: 'Vital Signs', icon: Activity },
-  { id: 'results', label: 'Results Review', icon: FileBarChart },
-  { id: 'histories', label: 'Histories', icon: History },
-  { id: 'immunizations', label: 'Immunizations', icon: Syringe },
-  { id: 'schedule', label: 'Patient Schedule', icon: CalendarDays },
-  { id: 'synopsis', label: 'Synopsis', icon: FileText },
-  { id: 'visits', label: 'Visits', icon: Calendar },
-  { id: 'documents', label: 'Documents', icon: FileText },
-  { id: 'prescriptions', label: 'Prescriptions', icon: Pill },
-  { id: 'tools', label: 'Tools', icon: Settings },
-  { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-  { id: 'reports', label: 'Reports', icon: BarChart },
-];
+interface SBARData {
+  situation: string;
+  background: string;
+  assessment: string;
+  recommendation: string;
+}
+
+interface SBARCreateResponse {
+  id: number;
+  situation: string;
+  background: string;
+  assessment: string;
+  recommendation: string;
+  status: string;
+}
 
 // SBAR Component
-function SBARView({ patient }: { patient: Patient }) {
-  const [sbarData, setSbarData] = useState({
-    situation: '',
-    background: '',
-    assessment: '',
-    recommendation: ''
+function SBARView({ patient, sbars }: { patient: Patient; sbars: SBARCreateResponse[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialSBAR = sbars && sbars.length > 0
+    ? { 
+      situation: sbars[0].situation || '',
+      background: sbars[0].background || '',
+      assessment: sbars[0].assessment || '',
+      recommendation: sbars[0].recommendation || ''
+    }
+    : { situation: '', background: '', assessment: '', recommendation: '' };
+  
+  const [sbarData, setSbarData] = useState<SBARData>(initialSBAR);
+
+  const createSBARMutation = useMutation({
+    mutationFn: (data: SBARData) => clinicalApi.createSBAR(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sbar', patient.id] });
+    },
   });
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    if (sbars && sbars.length > 0) {
+      setSbarData({
+        situation: sbars[0].situation || '',
+        background: sbars[0].background || '',
+        assessment: sbars[0].assessment || '',
+        recommendation: sbars[0].recommendation || ''
+      });
+    }
+  }, [sbars]);
+
   const handleSaveDraft = () => {
-    // Save to localStorage for persistence
-    const draftData = {
-      patientId: patient.id,
-      ...sbarData,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem(`sbar_draft_${patient.id}`, JSON.stringify(draftData));
+    createSBARMutation.mutate({
+      situation: sbarData.situation,
+      background: sbarData.background,
+      assessment: sbarData.assessment,
+      recommendation: sbarData.recommendation,
+      status: 'draft'
+    });
     toast.success('SBAR saved as draft');
   };
 
   const handleSubmit = () => {
-    // Validate required fields
     if (!sbarData.situation || !sbarData.background || !sbarData.assessment || !sbarData.recommendation) {
       toast.error('Please fill in all SBAR sections');
       return;
     }
     
-    // Here you would normally send to API
-    const sbarSubmission = {
-      patientId: patient.id,
-      ...sbarData,
-      submittedAt: new Date().toISOString()
-    };
-    console.log('SBAR submitted:', sbarSubmission);
-    toast.success('SBAR submitted successfully');
-    
-    // Clear form after successful submission
-    setSbarData({
-      situation: '',
-      background: '',
-      assessment: '',
-      recommendation: ''
+    createSBARMutation.mutate({
+      situation: sbarData.situation,
+      background: sbarData.background,
+      assessment: sbarData.assessment,
+      recommendation: sbarData.recommendation,
+      status: 'submitted'
     });
+    toast.success('SBAR submitted successfully');
   };
 
   return (
@@ -197,17 +209,22 @@ function SBARView({ patient }: { patient: Patient }) {
 }
 
 // Inpatient Summaries Component
-function InpatientSummariesView({ patient }: { patient: Patient }) {
-  const [admissions, setAdmissions] = useState([
-    {
-      id: 'ADM25001',
-      admissionDate: '2025-03-10',
-      dischargeDate: '2025-03-15',
-      department: 'General Medicine',
-      diagnosis: 'Community Acquired Pneumonia',
-      status: 'Discharged'
-    }
-  ]);
+function InpatientSummariesView({ patient, admissions }: { patient: Patient; admissions: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialAdmissions = admissions && admissions.length > 0
+    ? admissions.map(a => ({ id: a.id, admissionDate: a.admission_date?.split('T')[0], dischargeDate: a.discharge_date?.split('T')[0], department: a.department, diagnosis: a.primary_diagnosis, status: a.status, room: a.room_number, type: a.admission_type }))
+    : [];
+
+  const [admissionsList, setAdmissionsList] = useState<any[]>(initialAdmissions);
+
+  const createAdmissionMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createAdmission(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admissions', patient.id] });
+    },
+  });
+
   const [showNewAdmissionDialog, setShowNewAdmissionDialog] = useState(false);
   const [newAdmission, setNewAdmission] = useState({
     department: '',
@@ -215,6 +232,21 @@ function InpatientSummariesView({ patient }: { patient: Patient }) {
     admissionType: 'Emergency',
     room: ''
   });
+
+  useEffect(() => {
+    if (admissions && admissions.length > 0) {
+      setAdmissionsList(admissions.map(a => ({ 
+        id: a.id, 
+        admissionDate: a.admission_date?.split('T')[0], 
+        dischargeDate: a.discharge_date?.split('T')[0], 
+        department: a.department, 
+        diagnosis: a.primary_diagnosis, 
+        status: a.status, 
+        room: a.room_number, 
+        type: a.admission_type 
+      })));
+    }
+  }, [admissions]);
 
   const handleNewAdmission = () => {
     setShowNewAdmissionDialog(true);
@@ -227,7 +259,7 @@ function InpatientSummariesView({ patient }: { patient: Patient }) {
     }
 
     const admission = {
-      id: `ADM${Date.now()}`,
+      id: Date.now(),
       admissionDate: new Date().toISOString().split('T')[0],
       dischargeDate: null,
       department: newAdmission.department,
@@ -237,9 +269,16 @@ function InpatientSummariesView({ patient }: { patient: Patient }) {
       type: newAdmission.admissionType
     };
 
-    setAdmissions([admission, ...admissions]);
+    setAdmissionsList([admission, ...admissionsList]);
     setNewAdmission({ department: '', diagnosis: '', admissionType: 'Emergency', room: '' });
     setShowNewAdmissionDialog(false);
+    
+    createAdmissionMutation.mutate({
+      department: newAdmission.department,
+      primary_diagnosis: newAdmission.diagnosis,
+      admission_type: newAdmission.admissionType,
+      room_number: newAdmission.room
+    });
     toast.success('New admission created successfully');
   };
 
@@ -253,41 +292,51 @@ function InpatientSummariesView({ patient }: { patient: Patient }) {
         </Button>
       </div>
       
-      {admissions.map((admission) => (
-        <Card key={admission.id} className="border border-gray-200">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Admission ID</p>
-                <p className="font-semibold text-lg">{admission.id}</p>
-              </div>
-              <Badge variant={admission.status === 'Discharged' ? 'secondary' : 'default'}>
-                {admission.status}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-sm text-gray-500">Admission Date</p>
-                <p className="font-medium">{admission.admissionDate}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Discharge Date</p>
-                <p className="font-medium">{admission.dischargeDate || 'Still admitted'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Department</p>
-                <p className="font-medium">{admission.department}</p>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Primary Diagnosis</p>
-              <p className="font-medium">{admission.diagnosis}</p>
-            </div>
+      {admissionsList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <BedDouble className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No admissions recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "New Admission" to record an inpatient admission</p>
           </CardContent>
         </Card>
-      ))}
+      ) : (
+        admissionsList.map((admission) => (
+          <Card key={admission.id} className="border border-gray-200">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Admission ID</p>
+                  <p className="font-semibold text-lg">{admission.id}</p>
+                </div>
+                <Badge variant={admission.status === 'Discharged' ? 'secondary' : 'default'}>
+                  {admission.status}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Admission Date</p>
+                  <p className="font-medium">{admission.admissionDate}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Discharge Date</p>
+                  <p className="font-medium">{admission.dischargeDate || 'Still admitted'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Department</p>
+                  <p className="font-medium">{admission.department}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Primary Diagnosis</p>
+                <p className="font-medium">{admission.diagnosis}</p>
+              </div>
+            </CardContent>
+          </Card>
+        ))
+      )}
 
       <Dialog open={showNewAdmissionDialog} onOpenChange={setShowNewAdmissionDialog}>
         <DialogContent className="sm:max-w-md">
@@ -455,19 +504,59 @@ function DemographicsView({ patient }: { patient: Patient }) {
 }
 
 // Allergies Component
-function AllergiesView({ patient }: { patient: Patient }) {
-  const [allergies, setAllergies] = useState([
-    { name: 'Penicillin', severity: 'Severe', reaction: 'Anaphylaxis' },
-    { name: 'Sulfa drugs', severity: 'Moderate', reaction: 'Rash' },
-    ...(patient.allergies ? patient.allergies.split(',').map(a => ({ name: a.trim(), severity: 'Reported', reaction: 'Unknown' })) : [])
-  ]);
+function AllergiesView({ patient, allergies }: { patient: Patient; allergies: any[] }) {
+  const queryClient = useQueryClient();
   
+  const getInitialAllergies = () => {
+    if (allergies && allergies.length > 0) {
+      return allergies.map(a => ({ id: a.id, name: a.allergen, severity: a.severity || 'Reported', reaction: a.reaction || 'Unknown' }));
+    }
+    if (patient.allergies) {
+      return patient.allergies.split(',').map((a: string, i: number) => ({ 
+        id: `patient-${i}`, 
+        name: a.trim(), 
+        severity: 'Reported', 
+        reaction: 'Unknown' 
+      }));
+    }
+    return [];
+  };
+  
+  const [allergiesList, setAllergiesList] = useState<any[]>(getInitialAllergies);
+  
+  const createAllergyMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createAllergy(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['allergies', patient.id] });
+    },
+  });
+
   const [showAddAllergyDialog, setShowAddAllergyDialog] = useState(false);
   const [newAllergy, setNewAllergy] = useState({
     allergen: '',
     reaction: '',
     severity: 'Moderate'
   });
+
+  useEffect(() => {
+    if (allergies && allergies.length > 0) {
+      setAllergiesList(allergies.map((a) => ({ 
+        id: a.id, 
+        name: a.allergen, 
+        severity: a.severity || 'Reported', 
+        reaction: a.reaction || 'Unknown' 
+      })));
+    } else if (patient.allergies) {
+      setAllergiesList(patient.allergies.split(',').map((a: string, i: number) => ({ 
+        id: `patient-${i}`, 
+        name: a.trim(), 
+        severity: 'Reported', 
+        reaction: 'Unknown' 
+      })));
+    } else {
+      setAllergiesList([]);
+    }
+  }, [allergies, patient.allergies]);
 
   const handleAddAllergy = () => {
     setShowAddAllergyDialog(true);
@@ -480,14 +569,21 @@ function AllergiesView({ patient }: { patient: Patient }) {
     }
 
     const allergy = {
+      id: Date.now(),
       name: newAllergy.allergen,
       severity: newAllergy.severity,
       reaction: newAllergy.reaction
     };
 
-    setAllergies([...allergies, allergy]);
+    setAllergiesList([...allergiesList, allergy]);
     setNewAllergy({ allergen: '', reaction: '', severity: 'Moderate' });
     setShowAddAllergyDialog(false);
+    
+    createAllergyMutation.mutate({
+      allergen: newAllergy.allergen,
+      reaction: newAllergy.reaction,
+      severity: newAllergy.severity
+    });
     toast.success('Allergy added successfully');
   };
 
@@ -510,9 +606,9 @@ function AllergiesView({ patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      {allergies.length > 0 ? (
+      {allergiesList.length > 0 ? (
         <div className="space-y-3">
-          {allergies.map((allergy, index) => (
+          {allergiesList.map((allergy, index) => (
             <Card key={index} className={`border-l-4 ${
               allergy.severity === 'Severe' ? 'border-l-red-500' : 
               allergy.severity === 'Moderate' ? 'border-l-orange-500' : 
@@ -597,14 +693,47 @@ function AllergiesView({ patient }: { patient: Patient }) {
 }
 
 // Problems and Diagnoses Component
-function ProblemsView({ patient }: { patient: Patient }) {
-  const problems = patient.chronic_conditions ? 
-    patient.chronic_conditions.split(',').map(c => c.trim()).filter(c => c) : [];
+function ProblemsView({ patient, problems }: { patient: Patient; problems: any[] }) {
+  const queryClient = useQueryClient();
+  
+  // Initialize diagnoses from props or patient data
+  const getInitialDiagnoses = () => {
+    if (problems && problems.length > 0) {
+      return problems.map(p => ({ 
+        id: p.id, 
+        code: p.icd10_code, 
+        name: p.description, 
+        status: p.status || 'Active', 
+        onset: p.onset_date, 
+        type: p.problem_type,
+        notes: p.notes || ''
+      }));
+    }
+    if (patient.chronic_conditions) {
+      return patient.chronic_conditions.split(',').map((c: string, i: number) => ({ 
+        id: `chronic-${i}`, 
+        name: c.trim(), 
+        status: 'Chronic',
+        code: '',
+        onset: '',
+        type: '',
+        notes: ''
+      }));
+    }
+    return [];
+  };
+  
+  const [diagnoses, setDiagnoses] = useState<any[]>(getInitialDiagnoses);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [selectedDiagnosis, setSelectedDiagnosis] = useState<any>(null);
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
 
-  const [diagnoses, setDiagnoses] = useState([
-    { code: 'J10.0', name: 'Influenza with pneumonia', status: 'Active', onset: '2025-03-10' },
-    { code: 'I10', name: 'Essential hypertension', status: 'Chronic', onset: '2020-01-15' },
-  ]);
+  const createProblemMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createProblem(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['problems', patient.id] });
+    },
+  });
 
   const [showAddDiagnosisDialog, setShowAddDiagnosisDialog] = useState(false);
   const [newDiagnosis, setNewDiagnosis] = useState({
@@ -614,6 +743,35 @@ function ProblemsView({ patient }: { patient: Patient }) {
     type: 'Primary',
     status: 'Active'
   });
+
+  const handleViewDetails = (diagnosis: any) => {
+    setSelectedDiagnosis(diagnosis);
+    setShowDetailsDialog(true);
+  };
+
+  useEffect(() => {
+    if (problems && problems.length > 0) {
+      setDiagnoses(problems.map(p => ({ 
+        id: p.id, 
+        code: p.icd10_code, 
+        name: p.description, 
+        status: p.status || 'Active', 
+        onset: p.onset_date, 
+        type: p.problem_type 
+      })));
+      setIsLoaded(true);
+    } else if (patient.chronic_conditions) {
+      setDiagnoses(patient.chronic_conditions.split(',').map((c: string, i: number) => ({ 
+        id: `chronic-${i}`, 
+        name: c.trim(), 
+        status: 'Chronic' 
+      })));
+      setIsLoaded(true);
+    } else {
+      setDiagnoses([]);
+      setIsLoaded(true);
+    }
+  }, [problems, patient.chronic_conditions]);
 
   const handleAddDiagnosis = () => {
     setShowAddDiagnosisDialog(true);
@@ -626,6 +784,7 @@ function ProblemsView({ patient }: { patient: Patient }) {
     }
 
     const diagnosis = {
+      id: Date.now(),
       code: newDiagnosis.icd10Code,
       name: newDiagnosis.description,
       status: newDiagnosis.status,
@@ -636,6 +795,14 @@ function ProblemsView({ patient }: { patient: Patient }) {
     setDiagnoses([diagnosis, ...diagnoses]);
     setNewDiagnosis({ description: '', icd10Code: '', onsetDate: '', type: 'Primary', status: 'Active' });
     setShowAddDiagnosisDialog(false);
+    
+    createProblemMutation.mutate({
+      description: newDiagnosis.description,
+      icd10_code: newDiagnosis.icd10Code,
+      onset_date: newDiagnosis.onsetDate || new Date().toISOString().split('T')[0],
+      problem_type: newDiagnosis.type,
+      status: newDiagnosis.status
+    });
     toast.success('Diagnosis added successfully');
   };
 
@@ -658,8 +825,24 @@ function ProblemsView({ patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      <div className="space-y-3">
-        {diagnoses.map((diagnosis, index) => (
+      {!isLoaded ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <div className="animate-spin h-8 w-8 border-2 border-slate-800 border-t-transparent rounded-full mx-auto" />
+            <p className="text-gray-500 mt-3">Loading...</p>
+          </CardContent>
+        </Card>
+      ) : diagnoses.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <Stethoscope className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No problems or diagnoses recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Add Diagnosis" to record a diagnosis</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {diagnoses.map((diagnosis, index) => (
           <Card key={index} className="border border-gray-200">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -670,16 +853,17 @@ function ProblemsView({ patient }: { patient: Patient }) {
                       {diagnosis.status}
                     </Badge>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">
-                    ICD-10: {diagnosis.code} • Onset: {diagnosis.onset}
-                  </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      ICD-10: {diagnosis.code} • Onset: {diagnosis.onset}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => handleViewDetails(diagnosis)}>View Details</Button>
                 </div>
-                <Button variant="ghost" size="sm">View Details</Button>
-              </div>
             </CardContent>
           </Card>
         ))}
-      </div>
+        </div>
+      )}
 
       {problems.length > 0 && (
         <>
@@ -690,7 +874,7 @@ function ProblemsView({ patient }: { patient: Patient }) {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-semibold">{problem}</h4>
+                      <h4 className="font-semibold">{problem.description}</h4>
                       <p className="text-sm text-gray-500">Chronic condition</p>
                     </div>
                     <Badge variant="secondary">Chronic</Badge>
@@ -771,17 +955,80 @@ function ProblemsView({ patient }: { patient: Patient }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View Diagnosis Details Dialog */}
+      <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Diagnosis Details</DialogTitle>
+          </DialogHeader>
+          {selectedDiagnosis && (
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label>Diagnosis</Label>
+                <p className="font-medium">{selectedDiagnosis.name}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>ICD-10 Code</Label>
+                  <p className="font-medium">{selectedDiagnosis.code || 'N/A'}</p>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Status</Label>
+                  <Badge variant={getStatusColor(selectedDiagnosis.status) as any}>
+                    {selectedDiagnosis.status}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Type</Label>
+                  <p className="font-medium">{selectedDiagnosis.type || 'N/A'}</p>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Onset Date</Label>
+                  <p className="font-medium">{selectedDiagnosis.onset || 'N/A'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDetailsDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 // Medication List Component
-function MedicationsView({ patient: _patient }: { patient: Patient }) {
-  const [medications, setMedications] = useState([
-    { name: 'Paracetamol', dose: '500mg', frequency: 'Every 6 hours', route: 'Oral', status: 'Active' },
-    { name: 'Oseltamivir', dose: '75mg', frequency: 'Twice daily', route: 'Oral', status: 'Active' },
-    { name: 'Amlodipine', dose: '5mg', frequency: 'Once daily', route: 'Oral', status: 'Chronic' },
-  ]);
+function MedicationsView({ patient, medications }: { patient: Patient; medications: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const getInitialMeds = () => {
+    if (medications && medications.length > 0) {
+      return medications.map(m => ({ id: m.id, name: m.medication_name, dose: m.dosage, frequency: m.frequency, route: m.route, status: m.status || 'Active', specialInstructions: m.special_instructions }));
+    }
+    if (patient.current_medications) {
+      return patient.current_medications.split(',').map((m: string, i: number) => ({ 
+        id: `patient-${i}`, 
+        name: m.trim(), 
+        dose: '', 
+        frequency: '', 
+        status: 'Active' 
+      }));
+    }
+    return [];
+  };
+  
+  const [medsList, setMedsList] = useState<any[]>(getInitialMeds);
+
+  const createMedicationMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createMedication(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['medications', patient.id] });
+    },
+  });
 
   const [showPrescriptionDialog, setShowPrescriptionDialog] = useState(false);
   const [newPrescription, setNewPrescription] = useState({
@@ -791,6 +1038,30 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
     route: 'Oral',
     specialInstructions: ''
   });
+
+  useEffect(() => {
+    if (medications && medications.length > 0) {
+      setMedsList(medications.map(m => ({ 
+        id: m.id, 
+        name: m.medication_name, 
+        dose: m.dosage, 
+        frequency: m.frequency, 
+        route: m.route, 
+        status: m.status || 'Active', 
+        specialInstructions: m.special_instructions 
+      })));
+    } else if (patient.current_medications) {
+      setMedsList(patient.current_medications.split(',').map((m: string, i: number) => ({ 
+        id: `patient-${i}`, 
+        name: m.trim(), 
+        dose: '', 
+        frequency: '', 
+        status: 'Active' 
+      })));
+    } else {
+      setMedsList([]);
+    }
+  }, [medications, patient.current_medications]);
 
   const handlePrescribe = () => {
     setShowPrescriptionDialog(true);
@@ -803,6 +1074,7 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
     }
 
     const prescription = {
+      id: Date.now(),
       name: newPrescription.medicationName,
       dose: newPrescription.dosage,
       frequency: newPrescription.frequency,
@@ -811,9 +1083,17 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
       specialInstructions: newPrescription.specialInstructions
     };
 
-    setMedications([prescription, ...medications]);
+    setMedsList([prescription, ...medsList]);
     setNewPrescription({ medicationName: '', dosage: '', frequency: '', route: 'Oral', specialInstructions: '' });
     setShowPrescriptionDialog(false);
+    
+    createMedicationMutation.mutate({
+      medication_name: newPrescription.medicationName,
+      dosage: newPrescription.dosage,
+      frequency: newPrescription.frequency,
+      route: newPrescription.route,
+      special_instructions: newPrescription.specialInstructions
+    });
     toast.success('Prescription added successfully');
   };
 
@@ -836,8 +1116,17 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      <div className="space-y-3">
-        {medications.map((med, index) => (
+      {medsList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <Pill className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No current medications</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Prescribe" to add a medication</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {medsList.map((med, index) => (
           <Card key={index} className="border border-gray-200">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -862,7 +1151,8 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
             </CardContent>
           </Card>
         ))}
-      </div>
+        </div>
+      )}
 
       <Dialog open={showPrescriptionDialog} onOpenChange={setShowPrescriptionDialog}>
         <DialogContent className="sm:max-w-md">
@@ -950,14 +1240,66 @@ function MedicationsView({ patient: _patient }: { patient: Patient }) {
 }
 
 // Vital Signs Component - NEW PAGE
-function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vitals: any }) {
+function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; vitals: any; vitalsHistory: any[] }) {
+  const queryClient = useQueryClient();
   const [timeRange, setTimeRange] = useState('24h');
-  const [vitalHistory, setVitalHistory] = useState([
-    { date: '2025-03-17 08:00', bp: '120/80', hr: 72, temp: 36.8, rr: 16, spo2: 98, weight: 75 },
-    { date: '2025-03-17 14:00', bp: '118/78', hr: 70, temp: 36.6, rr: 15, spo2: 99, weight: 75 },
-    { date: '2025-03-16 08:00', bp: '122/82', hr: 74, temp: 36.9, rr: 17, spo2: 97, weight: 75.2 },
-    { date: '2025-03-15 08:00', bp: '125/85', hr: 76, temp: 37.1, rr: 18, spo2: 96, weight: 75.5 },
-  ]);
+  
+  const [vitalHistory, setVitalHistory] = useState<any[]>(() => {
+    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
+      return vitalsHistory.map(v => ({ 
+        id: v.id,
+        date: v.recorded_at, 
+        bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
+        hr: v.heart_rate, 
+        temp: v.temperature, 
+        rr: v.respiratory_rate, 
+        spo2: v.oxygen_saturation, 
+        weight: v.weight,
+        height: v.height,
+        bmi: v.bmi
+      }));
+    }
+    return [];
+  });
+
+  // Sync with prop when it changes
+  useEffect(() => {
+    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
+      const mapped = vitalsHistory.map(v => ({ 
+        id: v.id,
+        date: v.recorded_at, 
+        bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
+        hr: v.heart_rate, 
+        temp: v.temperature, 
+        rr: v.respiratory_rate, 
+        spo2: v.oxygen_saturation, 
+        weight: v.weight,
+        height: v.height,
+        bmi: v.bmi
+      }));
+      // Only update if different to avoid unnecessary renders
+      setVitalHistory(prev => {
+        if (prev.length !== mapped.length || prev[0]?.id !== mapped[0]?.id) {
+          return mapped;
+        }
+        return prev;
+      });
+    }
+  }, [vitalsHistory]);
+
+  const createVitalSignsMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createVitalSigns(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vitalsHistory', patient.id] });
+      toast.success('Vital signs recorded successfully');
+    },
+    onError: () => {
+      toast.error('Failed to record vital signs');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['vitalsHistory', patient.id] });
+    },
+  });
 
   const [showRecordVitalsDialog, setShowRecordVitalsDialog] = useState(false);
   const [newVitals, setNewVitals] = useState({
@@ -971,6 +1313,14 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
     height: ''
   });
 
+  const calculateBMI = (weight: number, height: number): number => {
+    if (weight && height) {
+      const heightM = height / 100;
+      return Math.round((weight / (heightM * heightM)) * 10) / 10;
+    }
+    return 0;
+  };
+
   const handleRecordVitals = () => {
     setShowRecordVitalsDialog(true);
   };
@@ -981,24 +1331,37 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
       return;
     }
 
-    const vitalRecord = {
-      date: new Date().toLocaleString('en-US', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      }).replace(',', ''),
+    const weight = parseFloat(newVitals.weight) || 75;
+    const height = parseFloat(newVitals.height) || 170;
+    
+    const newVitalsRecord = {
+      id: Date.now(),
+      date: new Date().toISOString(),
       bp: `${newVitals.bloodPressureSystolic}/${newVitals.bloodPressureDiastolic}`,
       hr: parseInt(newVitals.heartRate),
       temp: parseFloat(newVitals.temperature) || 36.8,
       rr: parseInt(newVitals.respiratoryRate) || 16,
       spo2: parseInt(newVitals.spo2) || 98,
-      weight: parseFloat(newVitals.weight) || 75
+      weight: weight,
+      height: height,
+      bmi: weight && height ? Math.round((weight / ((height/100) * (height/100))) * 10) / 10 : 0
     };
 
-    setVitalHistory([vitalRecord, ...vitalHistory]);
+    // Optimistically add to local state
+    setVitalHistory(prev => [newVitalsRecord, ...prev]);
+
+    createVitalSignsMutation.mutate({
+      blood_pressure_systolic: parseInt(newVitals.bloodPressureSystolic),
+      blood_pressure_diastolic: parseInt(newVitals.bloodPressureDiastolic),
+      heart_rate: parseInt(newVitals.heartRate),
+      temperature: parseFloat(newVitals.temperature) || 36.8,
+      respiratory_rate: parseInt(newVitals.respiratoryRate) || 16,
+      oxygen_saturation: parseInt(newVitals.spo2) || 98,
+      weight: weight,
+      height: height,
+      pain_score: 0
+    });
+
     setNewVitals({
       bloodPressureSystolic: '',
       bloodPressureDiastolic: '',
@@ -1010,8 +1373,14 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
       height: ''
     });
     setShowRecordVitalsDialog(false);
-    toast.success('Vital signs recorded successfully');
   };
+
+  const getLatestVitals = () => {
+    if (vitalHistory.length > 0) return vitalHistory[0];
+    return { bp: '120/80', hr: 72, temp: 36.8, rr: 16, spo2: 98, weight: 75, height: 170, bmi: 25.9 };
+  };
+
+  const latest = getLatestVitals();
 
   return (
     <div className="space-y-4">
@@ -1034,6 +1403,16 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
         </div>
       </div>
 
+      {vitalHistory.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <Activity className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No vital signs recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Record Vitals" to record vital signs</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
       {/* Latest Vitals Summary */}
       <Card className="border border-gray-200">
         <CardHeader className="pb-2">
@@ -1048,35 +1427,35 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Thermometer className="h-6 w-6 text-orange-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">Temperature</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.temp || '36.8'}°C</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.temp ? `${vitalHistory[0].temp}°C` : '--'}</p>
             </div>
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Heart className="h-6 w-6 text-red-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">Heart Rate</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.hr || '72'}</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.hr || '--'}</p>
               <p className="text-xs text-gray-400">bpm</p>
             </div>
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Activity className="h-6 w-6 text-blue-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">Blood Pressure</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.bp || '120/80'}</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.bp || '--'}</p>
               <p className="text-xs text-gray-400">mmHg</p>
             </div>
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Wind className="h-6 w-6 text-green-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">Respiratory</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.rr || '16'}</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.rr || '--'}</p>
               <p className="text-xs text-gray-400">/min</p>
             </div>
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Droplets className="h-6 w-6 text-cyan-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">SpO2</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.spo2 || '98'}%</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.spo2 ? `${vitalHistory[0].spo2}%` : '--'}</p>
             </div>
             <div className="text-center p-4 bg-gray-50 rounded-lg">
               <Weight className="h-6 w-6 text-purple-500 mx-auto mb-2" />
               <p className="text-xs text-gray-500 uppercase mb-1">Weight</p>
-              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.weight || '75'}</p>
+              <p className="text-2xl font-bold text-slate-800">{vitalHistory[0]?.weight || '--'}</p>
               <p className="text-xs text-gray-400">kg</p>
             </div>
           </div>
@@ -1104,13 +1483,13 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
             <tbody>
               {vitalHistory.map((record, index) => (
                 <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 text-sm">{record.date}</td>
-                  <td className="py-3 px-4 text-sm text-center font-medium">{record.bp}</td>
-                  <td className="py-3 px-4 text-sm text-center">{record.hr}</td>
-                  <td className="py-3 px-4 text-sm text-center">{record.temp}°C</td>
-                  <td className="py-3 px-4 text-sm text-center">{record.rr}</td>
-                  <td className="py-3 px-4 text-sm text-center">{record.spo2}%</td>
-                  <td className="py-3 px-4 text-sm text-center">{record.weight} kg</td>
+                  <td className="py-3 px-4 text-sm">{record.date ? new Date(record.date).toLocaleString() : 'N/A'}</td>
+                  <td className="py-3 px-4 text-sm text-center font-medium">{record.bp || '--'}</td>
+                  <td className="py-3 px-4 text-sm text-center">{record.hr || '--'}</td>
+                  <td className="py-3 px-4 text-sm text-center">{record.temp ? `${record.temp}°C` : '--'}</td>
+                  <td className="py-3 px-4 text-sm text-center">{record.rr || '--'}</td>
+                  <td className="py-3 px-4 text-sm text-center">{record.spo2 ? `${record.spo2}%` : '--'}</td>
+                  <td className="py-3 px-4 text-sm text-center">{record.weight ? `${record.weight} kg` : '--'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1127,27 +1506,41 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-6">
-            <div className="text-center">
-              <p className="text-sm text-gray-500">Height</p>
-              <p className="text-xl font-bold">{vitals?.height || '170'} cm</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-gray-500">Weight</p>
-              <p className="text-xl font-bold">{vitalHistory[0]?.weight || '75'} kg</p>
-            </div>
-            <div className="h-12 w-px bg-gray-200" />
-            <div className="text-center">
-              <p className="text-sm text-gray-500">BMI</p>
-              <p className="text-2xl font-bold text-blue-600">{vitals?.bmi || '25.9'}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-gray-500">Category</p>
-              <Badge className="bg-yellow-100 text-yellow-800">Overweight</Badge>
-            </div>
-          </div>
+          {(() => {
+            const weight = latest?.weight || 75;
+            const height = latest?.height || 170;
+            const bmi = calculateBMI(weight, height);
+            let category = 'Normal';
+            let categoryClass = 'bg-green-100 text-green-800';
+            if (bmi >= 25) { category = 'Overweight'; categoryClass = 'bg-yellow-100 text-yellow-800'; }
+            if (bmi >= 30) { category = 'Obese'; categoryClass = 'bg-red-100 text-red-800'; }
+            if (bmi < 18.5) { category = 'Underweight'; categoryClass = 'bg-blue-100 text-blue-800'; }
+            return (
+              <div className="flex items-center gap-6">
+                <div className="text-center">
+                  <p className="text-sm text-gray-500">Height</p>
+                  <p className="text-xl font-bold">{height} cm</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-gray-500">Weight</p>
+                  <p className="text-xl font-bold">{weight} kg</p>
+                </div>
+                <div className="h-12 w-px bg-gray-200" />
+                <div className="text-center">
+                  <p className="text-sm text-gray-500">BMI</p>
+                  <p className="text-2xl font-bold text-blue-600">{bmi}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-gray-500">Category</p>
+                  <Badge className={categoryClass}>{category}</Badge>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
+      </>
+      )}
 
       <Dialog open={showRecordVitalsDialog} onOpenChange={setShowRecordVitalsDialog}>
         <DialogContent className="sm:max-w-lg">
@@ -1257,12 +1650,21 @@ function VitalSignsView({ patient: _patient, vitals }: { patient: Patient; vital
 }
 
 // Results Review Component
-function ResultsView({ patient: _patient }: { patient: Patient }) {
-  const [results, setResults] = useState([
-    { type: 'Laboratory', name: 'Complete Blood Count', date: '2025-03-17', status: 'Final', result: 'Normal' },
-    { type: 'Laboratory', name: 'Rapid Influenza Test', date: '2025-03-17', status: 'Final', result: 'Positive (Type A)' },
-    { type: 'Radiology', name: 'Chest X-Ray', date: '2025-03-16', status: 'Final', result: 'Bilateral infiltrates' },
-  ]);
+function ResultsView({ patient, labResults }: { patient: Patient; labResults: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialResults = labResults && labResults.length > 0
+    ? labResults.map(r => ({ id: r.id, type: r.test_type, name: r.test_name, date: r.order_date?.split('T')[0], status: r.status, result: r.result, urgency: r.urgency, clinicalIndication: r.clinical_indication }))
+    : [];
+
+  const [resultsList, setResultsList] = useState<any[]>(initialResults);
+
+  const createLabResultMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createLabResult(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['labResults', patient.id] });
+    },
+  });
 
   const [showOrderTestDialog, setShowOrderTestDialog] = useState(false);
   const [newTest, setNewTest] = useState({
@@ -1271,6 +1673,21 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
     urgency: 'Routine',
     clinicalIndication: ''
   });
+
+  useEffect(() => {
+    if (labResults && labResults.length > 0) {
+      setResultsList(labResults.map(r => ({ 
+        id: r.id, 
+        type: r.test_type, 
+        name: r.test_name, 
+        date: r.order_date?.split('T')[0], 
+        status: r.status, 
+        result: r.result, 
+        urgency: r.urgency, 
+        clinicalIndication: r.clinical_indication 
+      })));
+    }
+  }, [labResults]);
 
   const handleOrderTest = () => {
     setShowOrderTestDialog(true);
@@ -1283,6 +1700,7 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
     }
 
     const test = {
+      id: Date.now(),
       type: newTest.testType,
       name: newTest.testName,
       date: new Date().toISOString().split('T')[0],
@@ -1291,9 +1709,16 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
       urgency: newTest.urgency
     };
 
-    setResults([test, ...results]);
+    setResultsList([test, ...resultsList]);
     setNewTest({ testName: '', testType: 'Laboratory', urgency: 'Routine', clinicalIndication: '' });
     setShowOrderTestDialog(false);
+    
+    createLabResultMutation.mutate({
+      test_name: newTest.testName,
+      test_type: newTest.testType,
+      urgency: newTest.urgency,
+      clinical_indication: newTest.clinicalIndication
+    });
     toast.success('Test ordered successfully');
   };
 
@@ -1318,7 +1743,16 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
         </div>
       </div>
 
-      <Tabs defaultValue="all">
+      {resultsList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <FileBarChart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No results available</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Order Test" to order lab tests or imaging</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Tabs defaultValue="all">
         <TabsList className="mb-4">
           <TabsTrigger value="all">All Results</TabsTrigger>
           <TabsTrigger value="lab">Laboratory</TabsTrigger>
@@ -1327,7 +1761,7 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
         </TabsList>
 
         <TabsContent value="all" className="space-y-3">
-          {results.map((result, index) => (
+          {resultsList.map((result, index) => (
             <Card key={index} className="border border-gray-200">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -1359,6 +1793,7 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
           ))}
         </TabsContent>
       </Tabs>
+      )}
 
       <Dialog open={showOrderTestDialog} onOpenChange={setShowOrderTestDialog}>
         <DialogContent className="sm:max-w-md">
@@ -1432,19 +1867,37 @@ function ResultsView({ patient: _patient }: { patient: Patient }) {
 }
 
 // Histories Component
-function HistoriesView({ patient: _patient }: { patient: Patient }) {
-  const [histories, setHistories] = useState([
-    { type: 'Medical', description: 'Hypertension diagnosed 2020, on Amlodipine' },
-    { type: 'Surgical', description: 'Appendectomy 2015' },
-    { type: 'Family', description: 'Father: Diabetes, Mother: Hypertension' },
-    { type: 'Social', description: 'Non-smoker, occasional alcohol' },
-  ]);
+function HistoriesView({ patient, histories }: { patient: Patient; histories: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialHistories = histories && histories.length > 0
+    ? histories.map(h => ({ id: h.id, type: h.history_type, description: h.description }))
+    : [];
+
+  const [historiesList, setHistoriesList] = useState<any[]>(initialHistories);
+
+  const createHistoryMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createHistory(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['histories', patient.id] });
+    },
+  });
 
   const [showAddHistoryDialog, setShowAddHistoryDialog] = useState(false);
   const [newHistory, setNewHistory] = useState({
     type: 'Medical',
     description: ''
   });
+
+  useEffect(() => {
+    if (histories && histories.length > 0) {
+      setHistoriesList(histories.map(h => ({ 
+        id: h.id, 
+        type: h.history_type, 
+        description: h.description 
+      })));
+    }
+  }, [histories]);
 
   const handleAddHistory = () => {
     setShowAddHistoryDialog(true);
@@ -1457,13 +1910,19 @@ function HistoriesView({ patient: _patient }: { patient: Patient }) {
     }
 
     const history = {
+      id: Date.now(),
       type: newHistory.type,
       description: newHistory.description
     };
 
-    setHistories([...histories, history]);
+    setHistoriesList([...historiesList, history]);
     setNewHistory({ type: 'Medical', description: '' });
     setShowAddHistoryDialog(false);
+    
+    createHistoryMutation.mutate({
+      history_type: newHistory.type,
+      description: newHistory.description
+    });
     toast.success('History added successfully');
   };
 
@@ -1487,8 +1946,17 @@ function HistoriesView({ patient: _patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {histories.map((history, index) => (
+      {historiesList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <History className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No histories recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Add History" to record patient history</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {historiesList.map((history, index) => (
           <Card key={index} className="border border-gray-200">
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
@@ -1500,8 +1968,9 @@ function HistoriesView({ patient: _patient }: { patient: Patient }) {
               <p className="text-gray-700">{history.description}</p>
             </CardContent>
           </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       <Dialog open={showAddHistoryDialog} onOpenChange={setShowAddHistoryDialog}>
         <DialogContent className="sm:max-w-md">
@@ -1556,12 +2025,21 @@ function HistoriesView({ patient: _patient }: { patient: Patient }) {
 }
 
 // Immunizations Component
-function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
-  const [immunizations, setImmunizations] = useState([
-    { vaccine: 'COVID-19 Vaccine', dose: 'Booster', date: '2024-01-15', nextDue: 'N/A' },
-    { vaccine: 'Influenza', dose: 'Annual', date: '2024-10-01', nextDue: '2025-10-01' },
-    { vaccine: 'Tetanus', dose: '10-year', date: '2020-05-20', nextDue: '2030-05-20' },
-  ]);
+function ImmunizationsView({ patient, immunizations }: { patient: Patient; immunizations: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialImmunizations = immunizations && immunizations.length > 0
+    ? immunizations.map(i => ({ id: i.id, vaccine: i.vaccine_name, dose: i.dose, date: i.date_given, nextDue: i.next_due_date, lotNumber: i.lot_number, site: i.administration_site }))
+    : [];
+
+  const [immunizationsList, setImmunizationsList] = useState<any[]>(initialImmunizations);
+
+  const createImmunizationMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createImmunization(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['immunizations', patient.id] });
+    },
+  });
 
   const [showRecordVaccineDialog, setShowRecordVaccineDialog] = useState(false);
   const [newVaccine, setNewVaccine] = useState({
@@ -1572,6 +2050,20 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
     lotNumber: '',
     site: ''
   });
+
+  useEffect(() => {
+    if (immunizations && immunizations.length > 0) {
+      setImmunizationsList(immunizations.map(i => ({ 
+        id: i.id, 
+        vaccine: i.vaccine_name, 
+        dose: i.dose, 
+        date: i.date_given, 
+        nextDue: i.next_due_date, 
+        lotNumber: i.lot_number, 
+        site: i.administration_site 
+      })));
+    }
+  }, [immunizations]);
 
   const handleRecordVaccine = () => {
     setShowRecordVaccineDialog(true);
@@ -1584,6 +2076,7 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
     }
 
     const vaccine = {
+      id: Date.now(),
       vaccine: newVaccine.vaccine,
       dose: newVaccine.dose || 'Single',
       date: newVaccine.dateGiven,
@@ -1592,9 +2085,18 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
       site: newVaccine.site
     };
 
-    setImmunizations([vaccine, ...immunizations]);
+    setImmunizationsList([vaccine, ...immunizationsList]);
     setNewVaccine({ vaccine: '', dose: '', dateGiven: '', nextDue: '', lotNumber: '', site: '' });
     setShowRecordVaccineDialog(false);
+    
+    createImmunizationMutation.mutate({
+      vaccine_name: newVaccine.vaccine,
+      dose: newVaccine.dose,
+      date_given: newVaccine.dateGiven,
+      next_due_date: newVaccine.nextDue,
+      lot_number: newVaccine.lotNumber,
+      administration_site: newVaccine.site
+    });
     toast.success('Vaccine recorded successfully');
   };
 
@@ -1608,8 +2110,17 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      <Card className="border border-gray-200">
-        <table className="w-full">
+      {immunizationsList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <Syringe className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No immunizations recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Record Vaccine" to record an immunization</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border border-gray-200">
+          <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
               <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">Vaccine</th>
@@ -1619,7 +2130,7 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
             </tr>
           </thead>
           <tbody>
-            {immunizations.map((imm, index) => (
+            {immunizationsList.map((imm, index) => (
               <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="py-3 px-4">
                   <div className="flex items-center gap-2">
@@ -1641,6 +2152,7 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
           </tbody>
         </table>
       </Card>
+      )}
 
       <Dialog open={showRecordVaccineDialog} onOpenChange={setShowRecordVaccineDialog}>
         <DialogContent className="sm:max-w-md">
@@ -1719,11 +2231,21 @@ function ImmunizationsView({ patient: _patient }: { patient: Patient }) {
 }
 
 // Patient Schedule Component
-function ScheduleView({ patient: _patient }: { patient: Patient }) {
-  const [appointments, setAppointments] = useState([
-    { date: '2025-03-24', time: '09:00', type: 'Follow-up', provider: 'Dr. James Kamau', status: 'Scheduled' },
-    { date: '2025-04-15', time: '10:30', type: 'Lab Review', provider: 'Dr. James Kamau', status: 'Scheduled' },
-  ]);
+function ScheduleView({ patient, appointments }: { patient: Patient; appointments: any[] }) {
+  const queryClient = useQueryClient();
+  
+  const initialAppointments = appointments && appointments.length > 0
+    ? appointments.map(a => ({ id: a.id, date: a.appointment_date?.split('T')[0], time: a.appointment_date?.split('T')[1]?.substring(0, 5), type: a.appointment_type, provider: a.provider, status: a.status, notes: a.notes }))
+    : [];
+
+  const [appointmentsList, setAppointmentsList] = useState<any[]>(initialAppointments);
+
+  const createAppointmentMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createAppointment(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['appointments', patient.id] });
+    },
+  });
 
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [newAppointment, setNewAppointment] = useState({
@@ -1733,6 +2255,20 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
     provider: '',
     notes: ''
   });
+
+  useEffect(() => {
+    if (appointments && appointments.length > 0) {
+      setAppointmentsList(appointments.map(a => ({ 
+        id: a.id, 
+        date: a.appointment_date?.split('T')[0], 
+        time: a.appointment_date?.split('T')[1]?.substring(0, 5), 
+        type: a.appointment_type, 
+        provider: a.provider, 
+        status: a.status, 
+        notes: a.notes 
+      })));
+    }
+  }, [appointments]);
 
   const handleScheduleAppointment = () => {
     setShowScheduleDialog(true);
@@ -1745,6 +2281,7 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
     }
 
     const appointment = {
+      id: Date.now(),
       date: newAppointment.date,
       time: newAppointment.time,
       type: newAppointment.type,
@@ -1753,7 +2290,7 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
       notes: newAppointment.notes
     };
 
-    setAppointments([...appointments, appointment].sort((a, b) => {
+    setAppointmentsList([...appointmentsList, appointment].sort((a, b) => {
       const dateA = new Date(`${a.date} ${a.time}`);
       const dateB = new Date(`${b.date} ${b.time}`);
       return dateA.getTime() - dateB.getTime();
@@ -1761,6 +2298,13 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
     
     setNewAppointment({ date: '', time: '', type: 'Follow-up', provider: '', notes: '' });
     setShowScheduleDialog(false);
+    
+    createAppointmentMutation.mutate({
+      appointment_date: `${newAppointment.date}T${newAppointment.time}`,
+      appointment_type: newAppointment.type,
+      provider: newAppointment.provider,
+      notes: newAppointment.notes
+    });
     toast.success('Appointment scheduled successfully');
   };
 
@@ -1783,8 +2327,17 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
         </Button>
       </div>
 
-      <div className="space-y-3">
-        {appointments.map((apt, index) => (
+      {appointmentsList.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <CalendarDays className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No appointments scheduled</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Schedule Appointment" to schedule a new appointment</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {appointmentsList.map((apt, index) => (
           <Card key={index} className="border border-gray-200">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -1808,6 +2361,7 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
           </Card>
         ))}
       </div>
+      )}
 
       <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
         <DialogContent className="sm:max-w-md">
@@ -1884,8 +2438,243 @@ function ScheduleView({ patient: _patient }: { patient: Patient }) {
   );
 }
 
+// AI Risk Assessment Suggestions Component
+function RiskAssessmentSuggestions({ patient }: { patient: Patient }) {
+  const { id } = useParams<{ id: string }>();
+  const patientId = parseInt(id || '0');
+  const [suggestions, setSuggestions] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const { data: vitalsData } = useQuery({
+    queryKey: ['vitalsHistory', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getVitalSigns(patientId);
+      return response.data.vital_signs?.[0] || null;
+    },
+  });
+
+  const { data: encountersData } = useQuery({
+    queryKey: ['patientHistory', patientId],
+    queryFn: async () => {
+      const response = await encountersApi.getPatientHistory(patientId);
+      return response.data.encounters || [];
+    },
+  });
+
+  const generateSuggestions = () => {
+    setIsLoading(true);
+    
+    // Generate suggestions based on patient data
+    const newSuggestions: any = {
+      priority_actions: [],
+      monitoring: [],
+      lifestyle: [],
+      follow_up: []
+    };
+
+    // Age-based suggestions
+    if (patient.age >= 65) {
+      newSuggestions.priority_actions.push('Consider geriatric assessment');
+      newSuggestions.priority_actions.push('Review medication list for interactions');
+    }
+
+    // Chronic conditions
+    if (patient.chronic_conditions) {
+      const conditions = patient.chronic_conditions.toLowerCase();
+      if (conditions.includes('diabetes')) {
+        newSuggestions.monitoring.push('Check HbA1c; monitor blood glucose');
+        newSuggestions.follow_up.push('Schedule diabetic eye examination');
+      }
+      if (conditions.includes('hypertension')) {
+        newSuggestions.monitoring.push('Monitor blood pressure regularly');
+        newSuggestions.lifestyle.push('Reduce sodium intake; regular exercise');
+      }
+      if (conditions.includes('asthma')) {
+        newSuggestions.monitoring.push('Review inhaler technique; check peak flow');
+      }
+      if (conditions.includes('hiv')) {
+        newSuggestions.monitoring.push('Monitor CD4 count and viral load');
+      }
+    }
+
+    // Vital signs suggestions
+    if (vitalsData) {
+      if (vitalsData.blood_pressure_systolic && vitalsData.blood_pressure_systolic >= 140) {
+        newSuggestions.priority_actions.push('Review antihypertensive therapy');
+      }
+      if (vitalsData.oxygen_saturation && vitalsData.oxygen_saturation < 92) {
+        newSuggestions.priority_actions.push('Assess respiratory status; consider oxygen');
+      }
+      if (vitalsData.temperature && vitalsData.temperature > 38.5) {
+        newSuggestions.priority_actions.push('Investigate potential infection');
+      }
+    }
+
+    // Visit frequency
+    if (encountersData && encountersData.length > 0) {
+      const recentEncounters = encountersData.filter((e: any) => {
+        const visitDate = new Date(e.visit_date);
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        return visitDate >= threeMonthsAgo;
+      });
+      
+      if (recentEncounters.length >= 3) {
+        newSuggestions.follow_up.push(`Patient has ${recentEncounters.length} visits in last 3 months - review care plan`);
+      }
+    }
+
+    // If no suggestions, add a default one
+    if (newSuggestions.priority_actions.length === 0 && 
+        newSuggestions.monitoring.length === 0 && 
+        newSuggestions.lifestyle.length === 0 &&
+        newSuggestions.follow_up.length === 0) {
+      newSuggestions.monitoring.push('Continue routine care');
+    }
+
+    setSuggestions(newSuggestions);
+    setIsLoading(false);
+  };
+
+  return (
+    <Card className="border border-blue-200 bg-blue-50">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-blue-600" />
+            <span className="font-semibold text-blue-800">AI Risk Assessment Suggestions</span>
+          </div>
+          <Button 
+            size="sm" 
+            variant="outline"
+            onClick={generateSuggestions}
+            disabled={isLoading}
+          >
+            {isLoading ? 'Analyzing...' : 'Generate Suggestions'}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {suggestions ? (
+          <div className="space-y-4">
+            {suggestions.priority_actions.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-red-700 mb-1">Priority Actions</p>
+                <ul className="space-y-1">
+                  {suggestions.priority_actions.map((action: string, i: number) => (
+                    <li key={i} className="text-sm text-red-600 flex items-center gap-2">
+                      <span className="text-red-500">•</span> {action}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {suggestions.monitoring.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-orange-700 mb-1">Monitoring</p>
+                <ul className="space-y-1">
+                  {suggestions.monitoring.map((item: string, i: number) => (
+                    <li key={i} className="text-sm text-orange-600 flex items-center gap-2">
+                      <span className="text-orange-500">•</span> {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {suggestions.lifestyle.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-green-700 mb-1">Lifestyle</p>
+                <ul className="space-y-1">
+                  {suggestions.lifestyle.map((item: string, i: number) => (
+                    <li key={i} className="text-sm text-green-600 flex items-center gap-2">
+                      <span className="text-green-500">•</span> {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {suggestions.follow_up.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-blue-700 mb-1">Follow-up</p>
+                <ul className="space-y-1">
+                  {suggestions.follow_up.map((item: string, i: number) => (
+                    <li key={i} className="text-sm text-blue-600 flex items-center gap-2">
+                      <span className="text-blue-500">•</span> {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">
+            Click "Generate Suggestions" to get AI-powered risk assessment and clinical recommendations based on patient data.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // Synopsis Component (Main Dashboard View)
-function SynopsisView({ patient, vitals }: { patient: Patient; vitals: any }) {
+function SynopsisView({ patient, vitals, vitalsHistory, medications, problems, allergies, encounters }: { 
+  patient: Patient; 
+  vitals: any;
+  vitalsHistory?: any[];
+  medications?: any[];
+  problems?: any[];
+  allergies?: any[];
+  encounters?: any[];
+}) {
+  // Properly map vitalsHistory to a consistent format
+  const [mappedVitals, setMappedVitals] = useState<any>(null);
+  
+  useEffect(() => {
+    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
+      const latest = vitalsHistory[0];
+      setMappedVitals({
+        bp: latest.blood_pressure?.display || (latest.blood_pressure_systolic ? `${latest.blood_pressure_systolic}/${latest.blood_pressure_diastolic}` : null),
+        hr: latest.heart_rate,
+        temp: latest.temperature,
+        rr: latest.respiratory_rate,
+        spo2: latest.oxygen_saturation,
+        weight: latest.weight,
+        height: latest.height,
+        blood_pressure_systolic: latest.blood_pressure_systolic,
+        blood_pressure_diastolic: latest.blood_pressure_diastolic,
+        blood_pressure: latest.blood_pressure,
+      });
+    } else if (vitals) {
+      setMappedVitals(vitals);
+    } else {
+      setMappedVitals(null);
+    }
+  }, [vitalsHistory, vitals]);
+
+  const displayVitals = mappedVitals;
+  
+  const hasVitals = displayVitals && (
+    displayVitals.bp || 
+    displayVitals.blood_pressure?.display || 
+    displayVitals.blood_pressure_systolic ||
+    displayVitals.heart_rate || 
+    displayVitals.hr ||
+    displayVitals.temperature || 
+    displayVitals.temp ||
+    displayVitals.respiratory_rate || 
+    displayVitals.rr ||
+    displayVitals.oxygen_saturation || 
+    displayVitals.spo2 ||
+    displayVitals.weight
+  );
+  
+  const activeProblems = problems && problems.filter((p: any) => p.status === 'Active');
+  const activeMedications = medications && medications.filter((m: any) => m.status === 'Active');
+  const activeAllergies = allergies && allergies.filter((a: any) => a.is_active !== false);
+  
+  // Get recent encounters for clinical notes
+  const recentEncounters = encounters && encounters.length > 0 ? encounters.slice(0, 3) : [];
+  
   return (
     <div className="space-y-4">
       {/* Latest Vitals Card */}
@@ -1897,48 +2686,56 @@ function SynopsisView({ patient, vitals }: { patient: Patient; vitals: any }) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-6 gap-4">
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">BP</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.blood_pressure?.display || '120/80'}
-              </p>
-              <p className="text-xs text-gray-400">mmHg</p>
+          {hasVitals ? (
+            <div className="grid grid-cols-6 gap-4">
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">BP</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.bp || displayVitals?.blood_pressure?.display || (displayVitals?.blood_pressure_systolic ? `${displayVitals.blood_pressure_systolic}/${displayVitals.blood_pressure_diastolic}` : '--')}
+                </p>
+                <p className="text-xs text-gray-400">mmHg</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">HR</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.hr || displayVitals?.heart_rate || '--'}
+                </p>
+                <p className="text-xs text-gray-400">bpm</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">TEMP</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.temp || displayVitals?.temperature ? `${displayVitals.temp || displayVitals.temperature}°C` : '--'}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">RR</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.rr || displayVitals?.respiratory_rate || '--'}
+                </p>
+                <p className="text-xs text-gray-400">resp/m</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">SPO2</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.spo2 || displayVitals?.oxygen_saturation ? `${displayVitals.spo2 || displayVitals.oxygen_saturation}%` : '--'}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase mb-1">WEIGHT</p>
+                <p className="text-xl font-bold text-slate-800">
+                  {displayVitals?.weight || '--'}
+                </p>
+                <p className="text-xs text-gray-400">kg</p>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">HR</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.heart_rate || '72'}
-              </p>
-              <p className="text-xs text-gray-400">bpm</p>
+          ) : (
+            <div className="text-center py-8">
+              <Activity className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No vital signs recorded</p>
+              <p className="text-sm text-gray-400 mt-1">Record vitals in the Vital Signs section</p>
             </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">TEMP</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.temperature || '36.8'}°C
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">RR</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.respiratory_rate || '16'}
-              </p>
-              <p className="text-xs text-gray-400">resp/m</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">SPO2</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.oxygen_saturation || '98'}%
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase mb-1">WEIGHT</p>
-              <p className="text-xl font-bold text-slate-800">
-                {vitals?.weight || '75'}
-              </p>
-              <p className="text-xs text-gray-400">kg</p>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1953,18 +2750,31 @@ function SynopsisView({ patient, vitals }: { patient: Patient; vitals: any }) {
                 <span className="font-semibold">Active Problems</span>
               </div>
               <span className="bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">
-                {patient.chronic_conditions ? 1 : 0}
+                {activeProblems?.length || (patient?.chronic_conditions ? 1 : 0)}
               </span>
             </div>
           </CardHeader>
           <CardContent>
-            {patient.chronic_conditions ? (
+            {activeProblems && activeProblems.length > 0 ? (
+              <div className="space-y-2">
+                {activeProblems.map((problem: any, index: number) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-slate-800">{problem.description}</span>
+                      <Badge variant="outline" className="text-xs">{problem.status}</Badge>
+                    </div>
+                    {problem.icd10_code && (
+                      <p className="text-xs text-gray-500">ICD-10: {problem.icd10_code}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : patient?.chronic_conditions ? (
               <div className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-medium text-slate-800">{patient.chronic_conditions}</span>
                   <Badge variant="outline" className="text-xs">Active</Badge>
                 </div>
-                <p className="text-xs text-gray-500">ICD: J10.0</p>
               </div>
             ) : (
               <p className="text-gray-500 text-sm">No active problems</p>
@@ -1981,22 +2791,55 @@ function SynopsisView({ patient, vitals }: { patient: Patient; vitals: any }) {
                 <span className="font-semibold">Current Medications</span>
               </div>
               <span className="bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">
-                2
+                {activeMedications?.length || 0}
               </span>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="border border-gray-200 rounded-lg p-3">
-              <p className="font-medium text-slate-800">Paracetamol 500mg</p>
-              <p className="text-sm text-gray-500">500mg - Every 6 hours - Oral</p>
-            </div>
-            <div className="border border-gray-200 rounded-lg p-3">
-              <p className="font-medium text-slate-800">Oseltamivir 75mg</p>
-              <p className="text-sm text-gray-500">75mg - Twice daily - Oral</p>
-            </div>
+          <CardContent>
+            {activeMedications && activeMedications.length > 0 ? (
+              <div className="space-y-2">
+                {activeMedications.map((med: any, index: number) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-slate-800">{med.medication_name}</span>
+                      <Badge variant="outline" className="text-xs">{med.dosage} {med.frequency}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No current medications</p>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Allergies Card */}
+      {(activeAllergies && activeAllergies.length > 0) || (patient?.allergies && patient.allergies.split(',').length > 0) ? (
+        <Card className="border border-gray-200">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2 text-slate-700">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <span className="font-semibold">Known Allergies</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {activeAllergies && activeAllergies.length > 0 ? (
+                activeAllergies.map((allergy: any, index: number) => (
+                  <Badge key={index} variant="destructive" className="text-xs">
+                    {allergy.allergen} ({allergy.severity})
+                  </Badge>
+                ))
+              ) : patient?.allergies && patient.allergies.split(',').map((a: string, index: number) => (
+                <Badge key={index} variant="destructive" className="text-xs">
+                  {a.trim()}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Recent Clinical Notes */}
       <Card className="border border-gray-200">
@@ -2006,24 +2849,49 @@ function SynopsisView({ patient, vitals }: { patient: Patient; vitals: any }) {
               <ClipboardList className="h-4 w-4" />
               <span className="font-semibold">Recent Clinical Notes</span>
             </div>
-            <Button variant="outline" size="sm" className="text-xs">
-              New Note
-            </Button>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <Badge className="bg-slate-700 text-white text-xs">SOAP</Badge>
-              <span className="text-xs text-gray-500">17 Mar 2026, 13:58</span>
+          {recentEncounters.length > 0 ? (
+            <div className="space-y-3">
+              {recentEncounters.map((encounter: any, index: number) => (
+                <div key={index} className="border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-slate-800">{encounter.visit_type} Visit</span>
+                    <span className="text-xs text-gray-500">
+                      {encounter.visit_date?.split('T')[0]}
+                    </span>
+                  </div>
+                  {encounter.chief_complaint && (
+                    <p className="text-sm text-gray-600 mb-1">
+                      <strong>CC:</strong> {encounter.chief_complaint}
+                    </p>
+                  )}
+                  {encounter.assessment && (
+                    <p className="text-sm text-gray-600">
+                      <strong>Assessment:</strong> {encounter.assessment}
+                    </p>
+                  )}
+                  {encounter.diagnosis_primary && (
+                    <p className="text-sm text-gray-600">
+                      <strong>Diagnosis:</strong> {encounter.diagnosis_primary}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
-            <p className="font-medium text-slate-800 mb-1">Dr. James Kamau</p>
-            <p className="text-sm text-gray-600">
-              Clinical presentation consistent with influenza. Rapid influenza test pending.
-            </p>
-          </div>
+          ) : (
+            <div className="text-center py-8">
+              <ClipboardList className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No clinical notes recorded</p>
+              <p className="text-sm text-gray-400 mt-1">Create an encounter to add clinical notes</p>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* AI Risk Assessment Suggestions */}
+      <RiskAssessmentSuggestions patient={patient} />
     </div>
   );
 }
@@ -2040,6 +2908,10 @@ export default function PatientChart() {
       const response = await patientsApi.getById(patientId);
       return response.data.patient as Patient;
     },
+    enabled: patientId > 0,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
   });
 
   const { data: history } = useQuery({
@@ -2048,18 +2920,205 @@ export default function PatientChart() {
       const response = await encountersApi.getPatientHistory(patientId);
       return response.data as { patient: Patient; encounters: Encounter[] };
     },
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
   });
 
   const { data: alerts } = useQuery({
-    queryKey: ['alerts'],
+    queryKey: ['alerts', patientId],
     queryFn: async () => {
       const response = await aiApi.getAlerts();
-      return response.data.alerts;
+      const allAlerts = response.data.alerts || [];
+      return allAlerts.filter((a: any) => a.patient_id === patientId);
     },
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
   });
 
+  // Get user and permissions
+  const { user } = useAuth();
+  const canAccessProblemsDiagnoses = user?.role === 'admin' || user?.role === 'doctor';
+
+  // Clinical data queries with staleTime to prevent unnecessary refetching during navigation
+  const staleTime = 5 * 60 * 1000; // 5 minutes
+
+  const { data: allergiesData } = useQuery({
+    queryKey: ['allergies', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getAllergies(patientId);
+      return response.data.allergies;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: problemsData } = useQuery({
+    queryKey: ['problems', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getProblems(patientId);
+      return response.data.problems;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: medicationsData } = useQuery({
+    queryKey: ['medications', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getMedications(patientId);
+      return response.data.medications;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: historiesData } = useQuery({
+    queryKey: ['histories', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getHistories(patientId);
+      return response.data.histories;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: immunizationsData } = useQuery({
+    queryKey: ['immunizations', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getImmunizations(patientId);
+      return response.data.immunizations;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: appointmentsData } = useQuery({
+    queryKey: ['appointments', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getAppointments(patientId);
+      return response.data.appointments;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: resultsData } = useQuery({
+    queryKey: ['labResults', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getLabResults(patientId);
+      return response.data.results;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: admissionsData } = useQuery({
+    queryKey: ['admissions', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getAdmissions(patientId);
+      return response.data.admissions;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: vitalsHistoryData } = useQuery({
+    queryKey: ['vitalsHistory', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getVitalSigns(patientId);
+      const vitals = response.data.vital_signs || [];
+      return vitals.map((v: any) => ({
+        id: v.id,
+        date: v.recorded_at || new Date().toISOString(),
+        bp: v.blood_pressure_systolic ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` : '--',
+        hr: v.heart_rate,
+        temp: v.temperature,
+        rr: v.respiratory_rate,
+        spo2: v.oxygen_saturation,
+        weight: v.weight,
+        height: v.height,
+      }));
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: sbarData } = useQuery({
+    queryKey: ['sbar', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getSBARs(patientId);
+      return response.data.sbars;
+    },
+    enabled: !!patientId,
+    staleTime,
+    placeholderData: (previousData) => previousData,
+    refetchOnWindowFocus: false,
+  });
+
+  // Calculate allergies count dynamically
+  const allergiesCount = (() => {
+    if (allergiesData && allergiesData.length > 0) {
+      return allergiesData.length;
+    }
+    if (patient?.allergies) {
+      return patient.allergies.split(',').filter(Boolean).length;
+    }
+    return 0;
+  })();
+
+  // Build menu items with dynamic badges and permissions
+  const menuItemsWithBadges = [
+    { id: 'sbar', label: 'SBAR', icon: MessageSquare },
+    { id: 'inpatient', label: 'Inpatient Summaries', icon: BedDouble },
+    { id: 'demographics', label: 'Demographics', icon: User },
+    { id: 'allergies', label: 'Allergies', icon: AlertTriangle, badge: allergiesCount > 0 ? allergiesCount : undefined },
+    ...(canAccessProblemsDiagnoses ? [{ id: 'problems', label: 'Problems and Diagnoses', icon: Stethoscope }] : []),
+    { id: 'medications', label: 'Medication List', icon: Pill },
+    { id: 'vitals', label: 'Vital Signs', icon: Activity },
+    { id: 'results', label: 'Results Review', icon: FileBarChart },
+    { id: 'histories', label: 'Histories', icon: History },
+    { id: 'immunizations', label: 'Immunizations', icon: Syringe },
+    { id: 'schedule', label: 'Patient Schedule', icon: CalendarDays },
+    { id: 'synopsis', label: 'Synopsis', icon: FileText },
+    { id: 'visits', label: 'Visits', icon: Calendar },
+    { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+    { id: 'reports', label: 'Reports', icon: BarChart },
+  ];
+
+  // Get vital signs from clinical API (primary source) and encounters as fallback
+  const allVitals = (() => {
+    // First priority: vitals recorded via clinical API
+    if (vitalsHistoryData && vitalsHistoryData.length > 0) {
+      return vitalsHistoryData[0];
+    }
+    // Fallback: vitals from encounters
+    if (history?.encounters && history.encounters.length > 0) {
+      return history.encounters[0]?.vital_signs || null;
+    }
+    return null;
+  })();
+
   const patientAlerts = alerts?.filter((a: any) => a.patient_id === patientId) || [];
-  const latestVitals = history?.encounters?.[0]?.vital_signs;
 
   const getInitials = (name: string) => {
     const parts = name.split(' ');
@@ -2102,43 +3161,57 @@ export default function PatientChart() {
   const renderClinicalView = () => {
     switch (activeMenu) {
       case 'sbar':
-        return <SBARView patient={patient} />;
+        return <SBARView patient={patient} sbars={sbarData || []} />;
       case 'inpatient':
-        return <InpatientSummariesView patient={patient} />;
+        return <InpatientSummariesView patient={patient} admissions={admissionsData || []} />;
       case 'demographics':
         return <DemographicsView patient={patient} />;
       case 'allergies':
-        return <AllergiesView patient={patient} />;
+        return <AllergiesView patient={patient} allergies={allergiesData || []} />;
       case 'problems':
-        return <ProblemsView patient={patient} />;
+        if (!canAccessProblemsDiagnoses) {
+          return (
+            <Card className="border border-gray-200">
+              <CardContent className="p-8 text-center">
+                <Stethoscope className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500">You do not have permission to view Problems and Diagnoses</p>
+              </CardContent>
+            </Card>
+          );
+        }
+        return <ProblemsView patient={patient} problems={problemsData || []} />;
       case 'medications':
-        return <MedicationsView patient={patient} />;
+        return <MedicationsView patient={patient} medications={medicationsData || []} />;
       case 'vitals':
-        return <VitalSignsView patient={patient} vitals={latestVitals} />;
+        return <VitalSignsView patient={patient} vitals={allVitals} vitalsHistory={vitalsHistoryData || []} />;
       case 'results':
-        return <ResultsView patient={patient} />;
+        return <ResultsView patient={patient} labResults={resultsData || []} />;
       case 'histories':
-        return <HistoriesView patient={patient} />;
+        return <HistoriesView patient={patient} histories={historiesData || []} />;
       case 'immunizations':
-        return <ImmunizationsView patient={patient} />;
+        return <ImmunizationsView patient={patient} immunizations={immunizationsData || []} />;
       case 'schedule':
-        return <ScheduleView patient={patient} />;
+        return <ScheduleView patient={patient} appointments={appointmentsData || []} />;
       case 'synopsis':
-        return <SynopsisView patient={patient} vitals={latestVitals} />;
+        return (
+          <SynopsisView 
+            patient={patient} 
+            vitals={allVitals}
+            vitalsHistory={vitalsHistoryData || []}
+            medications={medicationsData || []}
+            problems={problemsData || []}
+            allergies={allergiesData || []}
+            encounters={history?.encounters || []}
+          />
+        );
       case 'visits':
         return <VisitsView patient={patient} />;
-      case 'documents':
-        return <DocumentsView patient={patient} />;
-      case 'prescriptions':
-        return <PrescriptionsView patient={patient} />;
-      case 'tools':
-        return <ToolsView patient={patient} />;
       case 'tasks':
         return <TasksView patient={patient} />;
       case 'reports':
         return <ReportsView patient={patient} />;
       default:
-        return <SynopsisView patient={patient} vitals={latestVitals} />;
+        return <SynopsisView patient={patient} vitals={allVitals} vitalsHistory={vitalsHistoryData || []} medications={medicationsData || []} problems={problemsData || []} allergies={allergiesData || []} encounters={history?.encounters || []} />;
     }
   };
 
@@ -2185,7 +3258,7 @@ export default function PatientChart() {
               Clinical Menu
             </p>
             <nav className="space-y-1">
-              {clinicalMenuItems.map((item) => (
+              {menuItemsWithBadges.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => setActiveMenu(item.id)}
@@ -2197,7 +3270,7 @@ export default function PatientChart() {
                 >
                   <item.icon className="h-4 w-4" />
                   <span className="flex-1 text-left">{item.label}</span>
-                  {item.badge && (
+                  {item.badge && item.badge > 0 && (
                     <span className="bg-red-500 text-white text-xs font-bold h-5 w-5 rounded-full flex items-center justify-center">
                       {item.badge}
                     </span>
@@ -2260,6 +3333,35 @@ export default function PatientChart() {
 
 // Additional View Components
 function VisitsView({ patient }: { patient: Patient }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  
+  const { data: appointmentsData, isLoading: appointmentsLoading } = useQuery({
+    queryKey: ['appointments', patient.id],
+    queryFn: async () => {
+      const response = await clinicalApi.getAppointments(patient.id);
+      return response.data.appointments;
+    },
+  });
+
+  const { data: encounterHistoryData = [], isLoading: encountersLoading } = useQuery({
+  queryKey: ['patientHistory', patient.id],
+  queryFn: async () => {
+    const response = await encountersApi.getPatientHistory(patient.id);
+    const data = response.data;
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.encounters)) return data.encounters;
+    return [];
+  },
+});
+
+  const createAppointmentMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createAppointment(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['appointments', patient.id] });
+    },
+  });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [visitData, setVisitData] = useState({
     visit_type: '',
@@ -2270,7 +3372,18 @@ function VisitsView({ patient }: { patient: Patient }) {
   });
 
   const handleScheduleVisit = () => {
-    toast.success('Visit scheduled successfully');
+    if (!visitData.visit_type || !visitData.date || !visitData.time) {
+      toast.error('Please fill in visit type, date and time');
+      return;
+    }
+    
+    createAppointmentMutation.mutate({
+      appointment_date: `${visitData.date}T${visitData.time}`,
+      appointment_type: visitData.visit_type,
+      provider: 'General Practitioner',
+      notes: `${visitData.reason}\n${visitData.notes}`
+    });
+    
     setIsDialogOpen(false);
     setVisitData({
       visit_type: '',
@@ -2281,14 +3394,150 @@ function VisitsView({ patient }: { patient: Patient }) {
     });
   };
 
+  const handleViewEncounter = (encounterId: number) => {
+    navigate(`/encounters/${encounterId}`);
+  };
+
+  const handleEditEncounter = (encounterId: number) => {
+    navigate(`/patients/${patient.id}/encounters/${encounterId}/edit`);
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h3 className="font-semibold text-lg">Patient Visits</h3>
-        <Button variant="outline" size="sm" onClick={() => setIsDialogOpen(true)}>
-          <Calendar className="h-4 w-4 mr-2" />
-          Schedule Visit
-        </Button>
+    <div className="space-y-6">
+      {/* Scheduled Visits Section */}
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-lg">Scheduled Visits</h3>
+          <Button variant="outline" size="sm" onClick={() => setIsDialogOpen(true)}>
+            <Calendar className="h-4 w-4 mr-2" />
+            Schedule Visit
+          </Button>
+        </div>
+        
+        {appointmentsLoading ? (
+          <Card className="border border-gray-200">
+            <CardContent className="p-8 text-center">
+              <div className="animate-spin h-8 w-8 border-2 border-slate-800 border-t-transparent rounded-full mx-auto" />
+              <p className="text-gray-500 mt-3">Loading...</p>
+            </CardContent>
+          </Card>
+        ) : !appointmentsData || appointmentsData.length === 0 ? (
+          <Card className="border border-gray-200">
+            <CardContent className="p-8 text-center">
+              <Calendar className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No visits scheduled</p>
+              <p className="text-sm text-gray-400 mt-1">Click "Schedule Visit" to schedule a new visit</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {appointmentsData.map((apt: any, index: number) => (
+              <Card key={index} className="border border-gray-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Calendar className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">{apt.appointment_type}</h4>
+                        <p className="text-sm text-gray-500">
+                          {apt.appointment_date?.replace('T', ' ')}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="default">{apt.status || 'Scheduled'}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Encounter History Section */}
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-lg">Encounter History</h3>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => navigate(`/patients/${patient.id}/new-encounter`)}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Add New Encounter
+          </Button>
+        </div>
+        
+        {encountersLoading ? (
+          <Card className="border border-gray-200">
+            <CardContent className="p-8 text-center">
+              <div className="animate-spin h-8 w-8 border-2 border-slate-800 border-t-transparent rounded-full mx-auto" />
+              <p className="text-gray-500 mt-3">Loading...</p>
+            </CardContent>
+          </Card>
+        ) : !Array.isArray(encounterHistoryData) || encounterHistoryData.length === 0 ? (
+
+          <Card className="border border-gray-200">
+            <CardContent className="p-8 text-center">
+              <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No encounter history</p>
+              <p className="text-sm text-gray-400 mt-1">Click "Add New Encounter" to create the first encounter</p>
+              <Button 
+                className="mt-4"
+                onClick={() => navigate(`/patients/${patient.id}/new-encounter`)}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Add New Encounter
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {encounterHistoryData.map((encounter: any, index: number) => (
+              <Card key={index} className="border border-gray-200 hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 bg-green-100 rounded-lg flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-green-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">
+                          {encounter.encounter_id || `Visit #${encounter.id}`}
+                        </h4>
+                        <p className="text-sm text-gray-500">
+                          {encounter.visit_date?.split('T')[0]} - {encounter.visit_type || 'General'}
+                        </p>
+                        {encounter.chief_complaint && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Complaint: {encounter.chief_complaint.substring(0, 50)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleViewEncounter(encounter.id)}
+                      >
+                        View
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => handleEditEncounter(encounter.id)}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
       
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -2372,7 +3621,8 @@ function VisitsView({ patient }: { patient: Patient }) {
   );
 }
 
-function DocumentsView({ patient }: { patient: Patient }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function DocumentsView(_props: { patient: Patient }) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [documentData, setDocumentData] = useState({
     title: '',
@@ -2475,26 +3725,8 @@ function DocumentsView({ patient }: { patient: Patient }) {
   );
 }
 
-function PrescriptionsView({ patient }: { patient: Patient }) {
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h3 className="font-semibold text-lg">Prescriptions</h3>
-        <Button variant="outline" size="sm">
-          <Pill className="h-4 w-4 mr-2" />
-          New Prescription
-        </Button>
-      </div>
-      <Card className="border border-gray-200">
-        <CardContent className="p-4">
-          <p className="text-gray-500">Prescription management would go here</p>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function ToolsView({ patient }: { patient: Patient }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function ToolsView(_props: { patient: Patient }) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [riskData, setRiskData] = useState({
     factors: [] as string[],
@@ -2724,13 +3956,39 @@ function ToolsView({ patient }: { patient: Patient }) {
 }
 
 function TasksView({ patient }: { patient: Patient }) {
+  const queryClient = useQueryClient();
+  
+  const { data: tasksData, isLoading } = useQuery({
+    queryKey: ['tasks', patient.id],
+    queryFn: async () => {
+      const response = await clinicalApi.getTasks(patient.id);
+      return response.data.tasks;
+    },
+    enabled: !!patient.id,
+  });
+
+  const createTaskMutation = useMutation({
+    mutationFn: (data: any) => clinicalApi.createTask(patient.id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', patient.id] });
+    },
+  });
+
+  const updateTaskMutation = useMutation({
+    mutationFn: ({ taskId, data }: { taskId: number; data: any }) => 
+      clinicalApi.updateTask(patient.id, taskId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', patient.id] });
+    },
+  });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [taskData, setTaskData] = useState({
+const [taskData, setTaskData] = useState({
     title: '',
     priority: 'medium',
     due_date: '',
     description: '',
-    assigned_to: ''
+    task_type: 'general'
   });
 
   const handleAddTask = () => {
@@ -2738,16 +3996,44 @@ function TasksView({ patient }: { patient: Patient }) {
       toast.error('Please enter a task title');
       return;
     }
-    toast.success('Task added successfully');
+    
+    createTaskMutation.mutate({
+      title: taskData.title,
+      description: taskData.description,
+      priority: taskData.priority,
+      due_date: taskData.due_date,
+      task_type: taskData.task_type,
+      status: 'pending'
+    });
+    
     setIsDialogOpen(false);
     setTaskData({
       title: '',
       priority: 'medium',
       due_date: '',
       description: '',
-      assigned_to: ''
+      task_type: 'general'
     });
+    toast.success('Task added successfully');
   };
+
+  const handleMarkDone = (taskId: number) => {
+    updateTaskMutation.mutate({ taskId, data: { status: 'completed' } });
+    toast.success('Task marked as completed');
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'urgent': return 'bg-red-100 text-red-800';
+      case 'high': return 'bg-orange-100 text-orange-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-blue-100 text-blue-800';
+    }
+  };
+
+  const tasks = tasksData || [];
+  const pendingTasks = tasks.filter((t: any) => t.status !== 'completed');
+  const completedTasks = tasks.filter((t: any) => t.status === 'completed');
 
   return (
     <div className="space-y-4">
@@ -2758,6 +4044,81 @@ function TasksView({ patient }: { patient: Patient }) {
           Add Task
         </Button>
       </div>
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <div className="animate-spin h-8 w-8 border-2 border-slate-800 border-t-transparent rounded-full mx-auto" />
+        </div>
+      ) : pendingTasks.length === 0 && completedTasks.length === 0 ? (
+        <Card className="border border-gray-200">
+          <CardContent className="p-8 text-center">
+            <CheckSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500">No tasks recorded</p>
+            <p className="text-sm text-gray-400 mt-1">Click "Add Task" to create a new task</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {/* Pending Tasks */}
+          {pendingTasks.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-medium text-gray-700">Pending ({pendingTasks.length})</h4>
+              {pendingTasks.map((task: any) => (
+                <Card key={task.id} className="border border-gray-200">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          onChange={() => handleMarkDone(task.id)}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        <div>
+                          <p className="font-medium">{task.title}</p>
+                          {task.description && (
+                            <p className="text-sm text-gray-500">{task.description}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
+                            {task.due_date && (
+                              <span className="text-xs text-gray-500">Due: {task.due_date}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Completed Tasks */}
+          {completedTasks.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-medium text-gray-700">Completed ({completedTasks.length})</h4>
+              {completedTasks.map((task: any) => (
+                <Card key={task.id} className="border border-gray-200 bg-gray-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        disabled
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      <div className="line-through text-gray-500">
+                        <p className="font-medium">{task.title}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-lg">
@@ -2800,15 +4161,6 @@ function TasksView({ patient }: { patient: Patient }) {
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="assigned_to">Assigned To</Label>
-              <Input
-                id="assigned_to"
-                placeholder="Assign to..."
-                value={taskData.assigned_to}
-                onChange={(e) => setTaskData({...taskData, assigned_to: e.target.value})}
-              />
-            </div>
-            <div className="grid gap-2">
               <Label htmlFor="description">Description</Label>
               <Textarea
                 id="description"
@@ -2839,31 +4191,170 @@ function TasksView({ patient }: { patient: Patient }) {
 }
 
 function ReportsView({ patient }: { patient: Patient }) {
+  const { id } = useParams<{ id: string }>();
+  const patientId = parseInt(id || '0');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedReport, setGeneratedReport] = useState<any>(null);
   const [reportData, setReportData] = useState({
-    report_type: '',
-    date_range: 'custom',
+    report_type: 'clinical_summary',
+    date_range: 'last_30_days',
     start_date: '',
     end_date: '',
-    format: 'pdf',
-    include_sections: [] as string[]
+    format: 'json',
+    include_sections: ['Demographics', 'Medications', 'Allergies', 'Vital Signs', 'Visit History']
   });
 
-  const handleGenerateReport = () => {
+  // Fetch patient data for reports
+  const { data: patientData } = useQuery({
+    queryKey: ['patient', patientId],
+    queryFn: async () => {
+      const response = await patientsApi.getById(patientId);
+      return response.data.patient;
+    },
+  });
+
+  const { data: encountersData } = useQuery({
+    queryKey: ['patientHistory', patientId],
+    queryFn: async () => {
+      const response = await encountersApi.getPatientHistory(patientId);
+      return response.data.encounters || [];
+    },
+  });
+
+  const { data: vitalsData } = useQuery({
+    queryKey: ['vitalsHistory', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getVitalSigns(patientId);
+      return response.data.vital_signs || [];
+    },
+  });
+
+  const { data: medicationsData } = useQuery({
+    queryKey: ['medications', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getMedications(patientId);
+      return response.data.medications || [];
+    },
+  });
+
+  const { data: allergiesData } = useQuery({
+    queryKey: ['allergies', patientId],
+    queryFn: async () => {
+      const response = await clinicalApi.getAllergies(patientId);
+      return response.data.allergies || [];
+    },
+  });
+
+  const handleGenerateReport = async () => {
     if (!reportData.report_type) {
       toast.error('Please select a report type');
       return;
     }
-    toast.success('Report generated successfully');
-    setIsDialogOpen(false);
-    setReportData({
-      report_type: '',
-      date_range: 'custom',
-      start_date: '',
-      end_date: '',
-      format: 'pdf',
-      include_sections: []
-    });
+
+    setIsGenerating(true);
+
+    // Calculate date range
+    const now = new Date();
+    let startDate = new Date();
+    let endDate = now;
+
+    switch (reportData.date_range) {
+      case 'last_7_days':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'last_30_days':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case 'last_90_days':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        break;
+      case 'last_year':
+        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+        break;
+      case 'custom':
+        if (reportData.start_date && reportData.end_date) {
+          startDate = new Date(reportData.start_date);
+          endDate = new Date(reportData.end_date);
+        }
+        break;
+    }
+
+    // Generate report based on type
+    const report: any = {
+      type: reportData.report_type,
+      generatedAt: now.toISOString(),
+      dateRange: {
+        start: startDate.toISOString(),
+        end: endDate.toISOString()
+      },
+      patient: patientData,
+      sections: {}
+    };
+
+    // Add sections based on selection
+    if (reportData.include_sections.includes('Demographics')) {
+      report.sections.demographics = {
+        fullName: patientData?.full_name,
+        patientId: patientData?.patient_id,
+        dateOfBirth: patientData?.date_of_birth,
+        gender: patientData?.gender,
+        bloodType: patientData?.blood_type,
+        phone: patientData?.phone,
+        email: patientData?.email,
+        address: patientData?.address,
+        county: patientData?.county,
+        emergencyContact: patientData?.emergency_contact
+      };
+    }
+
+    if (reportData.include_sections.includes('Medications')) {
+      report.sections.medications = medicationsData || [];
+    }
+
+    if (reportData.include_sections.includes('Allergies')) {
+      report.sections.allergies = allergiesData || [];
+    }
+
+    if (reportData.include_sections.includes('Vital Signs')) {
+      report.sections.vitalSigns = vitalsData || [];
+    }
+
+    if (reportData.include_sections.includes('Visit History')) {
+      const filteredEncounters = (encountersData || []).filter((e: any) => {
+        const visitDate = new Date(e.visit_date);
+        return visitDate >= startDate && visitDate <= endDate;
+      });
+      report.sections.visitHistory = filteredEncounters;
+    }
+
+    if (reportData.include_sections.includes('Lab Results')) {
+      report.sections.labResults = [];
+    }
+
+    // Simulate generation delay
+    setTimeout(() => {
+      setGeneratedReport(report);
+      setIsGenerating(false);
+      toast.success('Report generated successfully');
+    }, 1000);
+  };
+
+  const handleDownloadReport = () => {
+    if (!generatedReport) return;
+
+    // Create downloadable content
+    const content = JSON.stringify(generatedReport, null, 2);
+    const blob = new Blob([content], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `patient_report_${patient.patient_id}_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Report downloaded');
   };
 
   const toggleSection = (section: string) => {
@@ -2884,6 +4375,42 @@ function ReportsView({ patient }: { patient: Patient }) {
           Generate Report
         </Button>
       </div>
+      
+      {/* Generated Report Display */}
+      {generatedReport && (
+        <Card className="border border-blue-200 bg-blue-50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold text-blue-800">Report Generated</h4>
+              <Button size="sm" onClick={handleDownloadReport}>
+                Download Report
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-gray-500">Report Type:</p>
+                <p className="font-medium">{generatedReport.type}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Generated:</p>
+                <p className="font-medium">{new Date(generatedReport.generatedAt).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Sections Included:</p>
+                <p className="font-medium">{Object.keys(generatedReport.sections).join(', ')}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Date Range:</p>
+                <p className="font-medium">
+                  {new Date(generatedReport.dateRange.start).toLocaleDateString()} - {new Date(generatedReport.dateRange.end).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl">
@@ -2915,9 +4442,9 @@ function ReportsView({ patient }: { patient: Patient }) {
                     <SelectValue placeholder="Select format" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="json">JSON</SelectItem>
                     <SelectItem value="pdf">PDF</SelectItem>
                     <SelectItem value="docx">Word Document</SelectItem>
-                    <SelectItem value="excel">Excel</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2986,18 +4513,52 @@ function ReportsView({ patient }: { patient: Patient }) {
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleGenerateReport}>
-              Generate Report
+            <Button onClick={handleGenerateReport} disabled={isGenerating}>
+              {isGenerating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                'Generate Report'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       
+      {/* Recent Reports */}
       <Card className="border border-gray-200">
-        <CardContent className="p-4">
-          <p className="text-gray-500">Report generation would go here</p>
+        <CardHeader className="pb-2">
+          <h4 className="font-semibold">Report Information</h4>
+        </CardHeader>
+        <CardContent>
+          <p className="text-gray-500">Click "Generate Report" to create a new patient report. The report will include selected sections and be downloadable.</p>
+          {patientData && (
+            <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-gray-500">Patient:</p>
+                <p className="font-medium">{patientData.full_name}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Patient ID:</p>
+                <p className="font-medium">{patientData.patient_id}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Total Encounters:</p>
+                <p className="font-medium">{encountersData?.length || 0}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Vital Signs Records:</p>
+                <p className="font-medium">{vitalsData?.length || 0}</p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 }
+
+// Export unused components for potential future use
+export { DocumentsView, ToolsView };
