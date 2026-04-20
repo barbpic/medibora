@@ -217,66 +217,68 @@ def update_encounter(encounter_id):
     if 'status' in data:
         encounter.status = data['status']
     
-   # Update vital signs if provided
-if 'vital_signs' in data:
-    vs_data = data['vital_signs']
-    
-    # Check if vital signs already exist for this encounter
-    if encounter.vital_signs:
-        # Update existing vital signs
-        vital_signs = encounter.vital_signs
+      # Update vital signs if provided
+    if 'vital_signs' in data:
+        vs_data = data['vital_signs']
         
-        if 'temperature' in vs_data:
-            vital_signs.temperature = vs_data['temperature']
-        if 'temperature_site' in vs_data:
-            vital_signs.temperature_site = vs_data['temperature_site']
-        if 'heart_rate' in vs_data:
-            vital_signs.heart_rate = vs_data['heart_rate']
-        if 'respiratory_rate' in vs_data:
-            vital_signs.respiratory_rate = vs_data['respiratory_rate']
-        
-        # Handle both flat and nested blood pressure formats
-        bp_systolic = vs_data.get('blood_pressure_systolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('systolic'))
-        bp_diastolic = vs_data.get('blood_pressure_diastolic') or (vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('diastolic'))
-        if bp_systolic:
-            vital_signs.blood_pressure_systolic = bp_systolic
-        if bp_diastolic:
-            vital_signs.blood_pressure_diastolic = bp_diastolic
-            
-        if 'oxygen_saturation' in vs_data:
-            vital_signs.oxygen_saturation = vs_data['oxygen_saturation']
-        if 'weight' in vs_data:
-            vital_signs.weight = vs_data['weight']
-        if 'height' in vs_data:
-            vital_signs.height = vs_data['height']
-        if 'pain_score' in vs_data:
-            vital_signs.pain_score = vs_data['pain_score']
-    else:
-        # Create new vital signs if they don't exist
-        vital_signs = VitalSigns(
-            patient_id=encounter.patient_id,
-            encounter_id=encounter.id,
-            recorded_by=current_user_id,
-            temperature=vs_data.get('temperature'),
-            temperature_site=vs_data.get('temperature_site'),
-            heart_rate=vs_data.get('heart_rate'),
-            respiratory_rate=vs_data.get('respiratory_rate'),
-            blood_pressure_systolic=vs_data.get('blood_pressure_systolic'),
-            blood_pressure_diastolic=vs_data.get('blood_pressure_diastolic'),
-            oxygen_saturation=vs_data.get('oxygen_saturation'),
-            weight=vs_data.get('weight'),
-            height=vs_data.get('height'),
-            pain_score=vs_data.get('pain_score')
-        )
-        db.session.add(vital_signs)
-    
-    vital_signs.calculate_bmi()
-    vital_signs.check_critical_values()
-    
+        if encounter.vital_signs:
+            vital_signs = encounter.vital_signs
+
+            if 'temperature' in vs_data:
+                vital_signs.temperature = vs_data['temperature']
+            if 'temperature_site' in vs_data:
+                vital_signs.temperature_site = vs_data['temperature_site']
+            if 'heart_rate' in vs_data:
+                vital_signs.heart_rate = vs_data['heart_rate']
+            if 'respiratory_rate' in vs_data:
+                vital_signs.respiratory_rate = vs_data['respiratory_rate']
+
+            bp_systolic = vs_data.get('blood_pressure_systolic') or (
+                vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('systolic')
+            )
+            bp_diastolic = vs_data.get('blood_pressure_diastolic') or (
+                vs_data.get('blood_pressure') and vs_data.get('blood_pressure', {}).get('diastolic')
+            )
+
+            if bp_systolic:
+                vital_signs.blood_pressure_systolic = bp_systolic
+            if bp_diastolic:
+                vital_signs.blood_pressure_diastolic = bp_diastolic
+
+            if 'oxygen_saturation' in vs_data:
+                vital_signs.oxygen_saturation = vs_data['oxygen_saturation']
+            if 'weight' in vs_data:
+                vital_signs.weight = vs_data['weight']
+            if 'height' in vs_data:
+                vital_signs.height = vs_data['height']
+            if 'pain_score' in vs_data:
+                vital_signs.pain_score = vs_data['pain_score']
+
+        else:
+            vital_signs = VitalSigns(
+                patient_id=encounter.patient_id,
+                encounter_id=encounter.id,
+                recorded_by=current_user_id,
+                temperature=vs_data.get('temperature'),
+                temperature_site=vs_data.get('temperature_site'),
+                heart_rate=vs_data.get('heart_rate'),
+                respiratory_rate=vs_data.get('respiratory_rate'),
+                blood_pressure_systolic=vs_data.get('blood_pressure_systolic'),
+                blood_pressure_diastolic=vs_data.get('blood_pressure_diastolic'),
+                oxygen_saturation=vs_data.get('oxygen_saturation'),
+                weight=vs_data.get('weight'),
+                height=vs_data.get('height'),
+                pain_score=vs_data.get('pain_score')
+            )
+            db.session.add(vital_signs)
+
+        vital_signs.calculate_bmi()
+        vital_signs.check_critical_values()
+
     db.session.commit()
-    
-    log_action(current_user_id, 'update_encounter', 'encounter', str(encounter_id), f'Updated encounter {encounter.encounter_id}')
-    
+
+    log_action(current_user_id,'update_encounter','encounter',str(encounter_id),f'Updated encounter {encounter.encounter_id}')
+
     return jsonify({
         'message': 'Encounter updated successfully',
         'encounter': encounter.to_dict()

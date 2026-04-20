@@ -79,17 +79,17 @@ export default function VitalSignsPage() {
   const vitalHistory = vitalsData && vitalsData.length > 0 
     ? vitalsData.map((v: any) => ({
         date: v.recorded_at?.replace('T', ' ').substring(0, 16) || '',
-        bp: v.blood_pressure_systolic ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` : '--',
-        hr: v.heart_rate || '--',
-        temp: v.temperature || '--',
-        rr: v.respiratory_rate || '--',
-        spo2: v.oxygen_saturation || '--',
+        bp: v.blood_pressure_systolic ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` : ' ',
+        hr: v.heart_rate || ' ',
+        temp: v.temperature || ' ',
+        rr: v.respiratory_rate || ' ',
+        spo2: v.oxygen_saturation || ' ',
         weight: v.weight,
         height: v.height || 170,
       }))
     : [];
 
-  const latestVitals = vitalHistory.length > 0 ? vitalHistory[0] : { bp: '--', hr: '--', temp: '--', rr: '--', spo2: '--', weight: 0, height: 170 };
+  const latestVitals = vitalHistory.length > 0 ? vitalHistory[0] : { bp: ' ', hr: ' ', temp: ' ', rr: ' ', spo2: ' ', weight: 0, height: 170 };
 
   // Calculate BMI
   const bmi = (latestVitals?.weight && latestVitals?.height) 
@@ -158,7 +158,7 @@ export default function VitalSignsPage() {
                 <Activity className="h-5 w-5 text-blue-600" />
                 <span className="text-sm text-gray-500">Blood Pressure</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals?.bp || '--'}</p>
+              <p className="text-2xl font-bold">{latestVitals?.bp || ' '}</p>
               <p className="text-xs text-gray-400">mmHg</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -173,7 +173,7 @@ export default function VitalSignsPage() {
                 <Heart className="h-5 w-5 text-red-500" />
                 <span className="text-sm text-gray-500">Heart Rate</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals?.hr || '--'}</p>
+              <p className="text-2xl font-bold">{latestVitals?.hr || ' '}</p>
               <p className="text-xs text-gray-400">bpm</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -188,7 +188,7 @@ export default function VitalSignsPage() {
                 <Thermometer className="h-5 w-5 text-orange-500" />
                 <span className="text-sm text-gray-500">Temperature</span>
               </div>
-              <p className="text-2xl font-bold">{latestVitals?.temp !== '--' ? `${latestVitals?.temp}°C` : '--'}</p>
+              <p className="text-2xl font-bold">{latestVitals?.temp !== ' ' ? `${latestVitals?.temp}°C` : ' '}</p>
               <p className="text-xs text-gray-400">Celsius</p>
               <div className="mt-2 flex items-center gap-1 text-green-600 text-sm">
                 <TrendingDown className="h-4 w-4" />
@@ -261,7 +261,7 @@ export default function VitalSignsPage() {
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">Weight</p>
-                    <p className="text-xl font-bold">{latestVitals?.weight || '--'} kg</p>
+                    <p className="text-xl font-bold">{latestVitals?.weight || ' '} kg</p>
                   </div>
                 </div>
                 <div className="border-t pt-4">
@@ -292,7 +292,7 @@ export default function VitalSignsPage() {
             </CardHeader>
             <CardContent>
               <VitalChart 
-                data={vitalHistory.length > 0 && vitalHistory[0].bp !== '--' ? vitalHistory.map(v => parseInt(v.bp.split('/')[0])) : [120, 118, 122, 125, 119, 121, 123]} 
+                data={vitalHistory.length > 0 && vitalHistory[0].bp !== ' ' ? vitalHistory.map(v => parseInt(v.bp.split('/')[0])) : [120, 118, 122, 125, 119, 121, 123]} 
                 color="#3b82f6" 
               />
               <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -316,7 +316,7 @@ export default function VitalSignsPage() {
             </CardHeader>
             <CardContent>
               <VitalChart 
-                data={vitalHistory.length > 0 && vitalHistory[0].hr !== '--' ? vitalHistory.map(v => parseInt(v.hr) || 0) : [72, 70, 74, 76, 71, 73, 75]} 
+                data={vitalHistory.length > 0 && vitalHistory[0].hr !== ' ' ? vitalHistory.map(v => parseInt(v.hr) || 0) : [72, 70, 74, 76, 71, 73, 75]} 
                 color="#ef4444" 
               />
               <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -362,10 +362,10 @@ export default function VitalSignsPage() {
                       <td className="py-3 px-4 text-sm">{record.date || 'N/A'}</td>
                       <td className="py-3 px-4 text-sm text-center font-medium">{record.bp}</td>
                       <td className="py-3 px-4 text-sm text-center">{record.hr}</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.temp !== '--' ? `${record.temp}°C` : '--'}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.temp !== ' ' ? `${record.temp}°C` : ' '}</td>
                       <td className="py-3 px-4 text-sm text-center">{record.rr}</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.spo2 !== '--' ? `${record.spo2}%` : '--'}</td>
-                      <td className="py-3 px-4 text-sm text-center">{record.weight || '--'}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.spo2 !== ' ' ? `${record.spo2}%` : ' '}</td>
+                      <td className="py-3 px-4 text-sm text-center">{record.weight || ' '}</td>
                       <td className="py-3 px-4 text-center">
                         <Badge className="bg-green-100 text-green-800">Normal</Badge>
                       </td>

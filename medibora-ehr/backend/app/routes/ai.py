@@ -9,8 +9,10 @@ from app.models.audit_log import AuditLog
 from app.ai.intelligent_search_tf_idf import get_search_engine, expand_medical_query
 from app.ai.rule_based_engine import get_rule_engine, AlertSeverity
 from app.ai.risk_classifier import get_risk_classifier
+from app.ai.vitals_risk_model import vitals_risk_predictor
 from app.utils.interoperability import get_interoperability_service
 from datetime import datetime, timedelta, date
+
 
 ai_bp = Blueprint('ai', __name__)
 
@@ -562,6 +564,236 @@ def export_patient_bundle(patient_id):
         'patient_id': patient_id,
         'format': 'FHIR R4 Bundle',
         'data': json.loads(bundle_json)
+    }), 200
+# ==================== VITALS RISK PREDICTION ====================
+
+@ai_bp.route('/vitals-risk/predict', methods=['POST'])
+@jwt_required(optional=True)  # Optional for testing, can be removed in production
+def predict_vitals_risk():
+    """
+    Predict clinical risk from vital signs data
+    Uses trained ML model or rule-based fallback
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Extract vitals with default values for missing fields
+        vital_signs = {
+            'heart_rate': data.get('heart_rate'),
+            'respiratory_rate': data.get('respiratory_rate'),
+            'temperature': data.get('temperature'),
+            'oxygen_saturation': data.get('oxygen_saturation'),
+            'systolic_bp': data.get('systolic_bp'),
+            'diastolic_bp': data.get('diastolic_bp'),
+            'age': data.get('age'),
+            'gender': data.get('gender'),
+            'weight': data.get('weight', 70),
+            'height': data.get('height', 1.7),
+            'heart_rate_variability': data.get('heart_rate_variability', 0.1)
+        }
+        
+        # Validate required fields
+        required_fields = ['heart_rate', 'respiratory_rate', 'temperature', 
+                          'oxygen_saturation', 'systolic_bp', 'diastolic_bp', 
+                          'age', 'gender']
+        
+        missing_fields = [field for field in required_fields if vital_signs.get(field) is None]
+        
+        if missing_fields:
+            return jsonify({
+                'error': 'Missing required fields',
+                'missing_fields': missing_fields,
+                'required_fields': required_fields
+            }), 400
+        
+        # Get prediction from vitals risk model
+        result = vitals_risk_predictor.predict(vital_signs)
+        
+        # Add input data to response for reference
+        result['input_data'] = {
+            'heart_rate': vital_signs['heart_rate'],
+            'respiratory_rate': vital_signs['respiratory_rate'],
+            'temperature': vital_signs['temperature'],
+            'oxygen_saturation': vital_signs['oxygen_saturation'],
+            'blood_pressure': f"{vital_signs['systolic_bp']}/{vital_signs['diastolic_bp']}",
+            'age': vital_signs['age'],
+            'gender': vital_signs['gender']
+        }
+        
+        # Log if user is authenticated
+        try:
+            current_user_id = get_jwt_identity()
+            if current_user_id:
+                log_action(int(current_user_id), 'vitals_risk_prediction', None, None, 
+                          f'Risk score: {result["risk_score"]:.2f}')
+        except:
+            pass  # Skip logging for unauthenticated requests
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        print(f"Error in predict_vitals_risk: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e)
+        }), 500
+
+
+@ai_bp.route('/vitals-risk/patient/<int:patient_id>', methods=['GET'])
+@jwt_required()
+def patient_vitals_risk(patient_id):
+    """Get risk assessment for a patient using their latest vital signs from database"""
+    current_user_id = int(get_jwt_identity())
+    
+    # Get patient info
+    patient = Patient.query.get(patient_id)
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+    
+    # Get latest vital signs
+    latest_vitals = VitalSigns.query.filter_by(
+        patient_id=patient_id
+    ).order_by(VitalSigns.recorded_at.desc()).first()
+    
+    if not latest_vitals:
+        return jsonify({
+            'error': 'No vital signs recorded for this patient',
+            'patient_id': patient_id,
+            'patient_name': f"{patient.first_name} {patient.last_name}"
+        }), 404
+    
+    # Prepare vitals data with patient info
+    vitals_data = {
+        'heart_rate': latest_vitals.heart_rate,
+        'respiratory_rate': latest_vitals.respiratory_rate,
+        'temperature': latest_vitals.temperature,
+        'oxygen_saturation': latest_vitals.oxygen_saturation,
+        'systolic_bp': latest_vitals.blood_pressure_systolic,
+        'diastolic_bp': latest_vitals.blood_pressure_diastolic,
+        'age': patient.get_age(),
+        'gender': patient.gender,
+        'weight': latest_vitals.weight,
+        'height': latest_vitals.height,
+        'heart_rate_variability': getattr(latest_vitals, 'heart_rate_variability', 0.1)
+    }
+    
+    # Get prediction
+    result = vitals_risk_predictor.predict(vitals_data)
+    
+    # Add patient info
+    result['patient'] = {
+        'id': patient_id,
+        'name': f"{patient.first_name} {patient.last_name}",
+        'gender': patient.gender,
+        'age': patient.get_age()
+    }
+    result['vitals_timestamp'] = latest_vitals.recorded_at.isoformat() if latest_vitals.recorded_at else None
+    
+    log_action(current_user_id, 'patient_vitals_risk', 'patient', str(patient_id), 
+              f'Risk score: {result["risk_score"]:.2f}')
+    
+    return jsonify(result), 200
+
+
+@ai_bp.route('/vitals-risk/high-risk-patients', methods=['GET'])
+@jwt_required()
+def high_risk_patients():
+    """Get all patients with recent high-risk vitals"""
+    current_user_id = int(get_jwt_identity())
+    
+    # Get patients with vitals recorded in last 24 hours
+    last_24h = datetime.utcnow() - timedelta(hours=24)
+    
+    # Get latest vitals per patient
+    from sqlalchemy import func, and_
+    
+    # Subquery to get latest vitals per patient
+    latest_vitals_subq = db.session.query(
+        VitalSigns.patient_id,
+        func.max(VitalSigns.recorded_at).label('latest_time')
+    ).filter(VitalSigns.recorded_at >= last_24h).group_by(VitalSigns.patient_id).subquery()
+    
+    # Get the actual vitals
+    recent_vitals = db.session.query(VitalSigns, Patient).join(
+        latest_vitals_subq,
+        and_(
+            VitalSigns.patient_id == latest_vitals_subq.c.patient_id,
+            VitalSigns.recorded_at == latest_vitals_subq.c.latest_time
+        )
+    ).join(Patient, Patient.id == VitalSigns.patient_id).all()
+    
+    high_risk_patients = []
+    
+    for vital, patient in recent_vitals:
+        vitals_data = {
+            'heart_rate': vital.heart_rate,
+            'respiratory_rate': vital.respiratory_rate,
+            'temperature': vital.temperature,
+            'oxygen_saturation': vital.oxygen_saturation,
+            'systolic_bp': vital.blood_pressure_systolic,
+            'diastolic_bp': vital.blood_pressure_diastolic,
+            'age': patient.get_age(),
+            'gender': patient.gender,
+            'weight': vital.weight,
+            'height': vital.height,
+        }
+        
+        risk = vitals_risk_predictor.predict(vitals_data)
+        
+        if risk['risk_score'] >= 0.6:  # High risk threshold
+            high_risk_patients.append({
+                'patient_id': patient.id,
+                'patient_name': f"{patient.first_name} {patient.last_name}",
+                'risk_score': risk['risk_score'],
+                'risk_level': risk['risk_level'],
+                'recommendation': risk['recommendation'],
+                'recorded_at': vital.recorded_at.isoformat() if vital.recorded_at else None
+            })
+    
+    # Sort by risk score descending
+    high_risk_patients.sort(key=lambda x: x['risk_score'], reverse=True)
+    
+    log_action(current_user_id, 'high_risk_patients', None, None, f'Found {len(high_risk_patients)} high risk patients')
+    
+    return jsonify({
+        'count': len(high_risk_patients),
+        'patients': high_risk_patients,
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
+
+
+@ai_bp.route('/vitals-risk/model-info', methods=['GET'])
+@jwt_required(optional=True)
+def vitals_model_info():
+    """Get information about the vitals risk model"""
+    return jsonify({
+        'model_trained': vitals_risk_predictor.is_trained,
+        'model_type': 'trained_ml_model' if vitals_risk_predictor.is_trained else 'rule_based_fallback',
+        'features_used': vitals_risk_predictor.feature_columns if vitals_risk_predictor.is_trained else None,
+        'disclaimer': 'AI-assisted prediction - not a substitute for clinical judgment'
+    }), 200
+
+
+@ai_bp.route('/health', methods=['GET'])
+def health_check():
+    """Simple health check endpoint to verify server is running"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'available_endpoints': [
+            '/api/ai/search',
+            '/api/ai/alerts/evaluate/<patient_id>',
+            '/api/ai/alerts',
+            '/api/ai/risk-assessment/<patient_id>',
+            '/api/ai/vitals-risk/predict',
+            '/api/ai/vitals-risk/patient/<patient_id>',
+            '/api/ai/vitals-risk/high-risk-patients',
+            '/api/ai/vitals-risk/model-info',
+            '/api/ai/health'
+        ]
     }), 200
 
 

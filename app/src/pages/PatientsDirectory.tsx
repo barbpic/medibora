@@ -57,7 +57,7 @@ export default function PatientsDirectory() {
     const dob = patient.date_of_birth 
       ? new Date(patient.date_of_birth).toISOString().split('T')[0]
       : 'N/A';
-    return `${dob} • ${patient.gender}`;
+    return `${patient.age} • ${patient.gender}`;
   };
 
   // Format last visit date

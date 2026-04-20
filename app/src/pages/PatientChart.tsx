@@ -74,7 +74,7 @@ function SBARView({ patient, sbars }: { patient: Patient; sbars: SBARCreateRespo
     }
     : { situation: '', background: '', assessment: '', recommendation: '' };
   
-  const [sbarData, setSbarData] = useState<SBARData>(initialSBAR);
+  const [sbarData, setSbarData] = useState(initialSBAR);
 
   const createSBARMutation = useMutation({
     mutationFn: (data: SBARData) => clinicalApi.createSBAR(patient.id, data),
@@ -1244,59 +1244,36 @@ function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; 
   const queryClient = useQueryClient();
   const [timeRange, setTimeRange] = useState('24h');
   
-  const [vitalHistory, setVitalHistory] = useState<any[]>(() => {
-    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
-      return vitalsHistory.map(v => ({ 
-        id: v.id,
-        date: v.recorded_at, 
-        bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
-        hr: v.heart_rate, 
-        temp: v.temperature, 
-        rr: v.respiratory_rate, 
-        spo2: v.oxygen_saturation, 
-        weight: v.weight,
-        height: v.height,
-        bmi: v.bmi
-      }));
-    }
-    return [];
-  });
-
-  // Sync with prop when it changes
-  useEffect(() => {
-    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
-      const mapped = vitalsHistory.map(v => ({ 
-        id: v.id,
-        date: v.recorded_at, 
-        bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
-        hr: v.heart_rate, 
-        temp: v.temperature, 
-        rr: v.respiratory_rate, 
-        spo2: v.oxygen_saturation, 
-        weight: v.weight,
-        height: v.height,
-        bmi: v.bmi
-      }));
-      // Only update if different to avoid unnecessary renders
-      setVitalHistory(prev => {
-        if (prev.length !== mapped.length || prev[0]?.id !== mapped[0]?.id) {
-          return mapped;
-        }
-        return prev;
-      });
-    }
-  }, [vitalsHistory]);
+  const initialVitalsData = vitalsHistory && vitalsHistory.length > 0
+    ? vitalsHistory.map(v => ({ 
+      id: v.id,
+      date: v.recorded_at, 
+      bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
+      hr: v.heart_rate, 
+      temp: v.temperature, 
+      rr: v.respiratory_rate, 
+      spo2: v.oxygen_saturation, 
+      weight: v.weight,
+      height: v.height,
+      bmi: v.bmi
+    }))
+    : vitals ? [{ 
+      date: new Date().toISOString(), 
+      bp: vitals.blood_pressure?.display || '',
+      hr: vitals.heart_rate, 
+      temp: vitals.temperature, 
+      rr: vitals.respiratory_rate, 
+      spo2: vitals.oxygen_saturation, 
+      weight: vitals.weight,
+      height: vitals.height,
+      bmi: vitals.bmi
+    }] : [];
+  
+  const [vitalHistory, setVitalHistory] = useState<any[]>(initialVitalsData);
 
   const createVitalSignsMutation = useMutation({
     mutationFn: (data: any) => clinicalApi.createVitalSigns(patient.id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['vitalsHistory', patient.id] });
-      toast.success('Vital signs recorded successfully');
-    },
-    onError: () => {
-      toast.error('Failed to record vital signs');
-    },
-    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['vitalsHistory', patient.id] });
     },
   });
@@ -1312,6 +1289,23 @@ function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; 
     weight: '',
     height: ''
   });
+
+  useEffect(() => {
+    if (vitalsHistory && vitalsHistory.length > 0) {
+      setVitalHistory(vitalsHistory.map(v => ({ 
+        id: v.id,
+        date: v.recorded_at, 
+        bp: v.blood_pressure?.display || `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`,
+        hr: v.heart_rate, 
+        temp: v.temperature, 
+        rr: v.respiratory_rate, 
+        spo2: v.oxygen_saturation, 
+        weight: v.weight,
+        height: v.height,
+        bmi: v.bmi
+      })));
+    }
+  }, [vitalsHistory]);
 
   const calculateBMI = (weight: number, height: number): number => {
     if (weight && height) {
@@ -1333,10 +1327,18 @@ function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; 
 
     const weight = parseFloat(newVitals.weight) || 75;
     const height = parseFloat(newVitals.height) || 170;
-    
-    const newVitalsRecord = {
+    const bmi = calculateBMI(weight, height);
+
+    const vitalRecord = {
       id: Date.now(),
-      date: new Date().toISOString(),
+      date: new Date().toLocaleString('en-US', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      }).replace(',', ''),
       bp: `${newVitals.bloodPressureSystolic}/${newVitals.bloodPressureDiastolic}`,
       hr: parseInt(newVitals.heartRate),
       temp: parseFloat(newVitals.temperature) || 36.8,
@@ -1344,24 +1346,10 @@ function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; 
       spo2: parseInt(newVitals.spo2) || 98,
       weight: weight,
       height: height,
-      bmi: weight && height ? Math.round((weight / ((height/100) * (height/100))) * 10) / 10 : 0
+      bmi: bmi
     };
 
-    // Optimistically add to local state
-    setVitalHistory(prev => [newVitalsRecord, ...prev]);
-
-    createVitalSignsMutation.mutate({
-      blood_pressure_systolic: parseInt(newVitals.bloodPressureSystolic),
-      blood_pressure_diastolic: parseInt(newVitals.bloodPressureDiastolic),
-      heart_rate: parseInt(newVitals.heartRate),
-      temperature: parseFloat(newVitals.temperature) || 36.8,
-      respiratory_rate: parseInt(newVitals.respiratoryRate) || 16,
-      oxygen_saturation: parseInt(newVitals.spo2) || 98,
-      weight: weight,
-      height: height,
-      pain_score: 0
-    });
-
+    setVitalHistory([vitalRecord, ...vitalHistory]);
     setNewVitals({
       bloodPressureSystolic: '',
       bloodPressureDiastolic: '',
@@ -1373,7 +1361,21 @@ function VitalSignsView({ patient, vitals, vitalsHistory }: { patient: Patient; 
       height: ''
     });
     setShowRecordVitalsDialog(false);
+
+     createVitalSignsMutation.mutate({
+      blood_pressure_systolic: parseInt(newVitals.bloodPressureSystolic),
+      blood_pressure_diastolic: parseInt(newVitals.bloodPressureDiastolic),
+      heart_rate: parseInt(newVitals.heartRate),
+      temperature: parseFloat(newVitals.temperature) || 36.8,
+      respiratory_rate: parseInt(newVitals.respiratoryRate) || 16,
+      oxygen_saturation: parseInt(newVitals.spo2) || 98,
+      weight: weight,
+      height: height,
+      pain_score: 0
+    });
+    toast.success('Vital signs recorded successfully');
   };
+
 
   const getLatestVitals = () => {
     if (vitalHistory.length > 0) return vitalHistory[0];
@@ -2445,8 +2447,9 @@ function RiskAssessmentSuggestions({ patient }: { patient: Patient }) {
   const [suggestions, setSuggestions] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // In RiskAssessmentSuggestions component
   const { data: vitalsData } = useQuery({
-    queryKey: ['vitalsHistory', patientId],
+    queryKey: ['vitalsHistory', patientId, 'latest'], // Added 'latest' to make it unique
     queryFn: async () => {
       const response = await clinicalApi.getVitalSigns(patientId);
       return response.data.vital_signs?.[0] || null;
@@ -2454,7 +2457,7 @@ function RiskAssessmentSuggestions({ patient }: { patient: Patient }) {
   });
 
   const { data: encountersData } = useQuery({
-    queryKey: ['patientHistory', patientId],
+    queryKey: ['patientHistory', patientId, 'encountersOnly'], // Added 'encountersOnly'
     queryFn: async () => {
       const response = await encountersApi.getPatientHistory(patientId);
       return response.data.encounters || [];
@@ -2626,45 +2629,16 @@ function SynopsisView({ patient, vitals, vitalsHistory, medications, problems, a
   allergies?: any[];
   encounters?: any[];
 }) {
-  // Properly map vitalsHistory to a consistent format
-  const [mappedVitals, setMappedVitals] = useState<any>(null);
-  
-  useEffect(() => {
-    if (Array.isArray(vitalsHistory) && vitalsHistory.length > 0) {
-      const latest = vitalsHistory[0];
-      setMappedVitals({
-        bp: latest.blood_pressure?.display || (latest.blood_pressure_systolic ? `${latest.blood_pressure_systolic}/${latest.blood_pressure_diastolic}` : null),
-        hr: latest.heart_rate,
-        temp: latest.temperature,
-        rr: latest.respiratory_rate,
-        spo2: latest.oxygen_saturation,
-        weight: latest.weight,
-        height: latest.height,
-        blood_pressure_systolic: latest.blood_pressure_systolic,
-        blood_pressure_diastolic: latest.blood_pressure_diastolic,
-        blood_pressure: latest.blood_pressure,
-      });
-    } else if (vitals) {
-      setMappedVitals(vitals);
-    } else {
-      setMappedVitals(null);
-    }
-  }, [vitalsHistory, vitals]);
-
-  const displayVitals = mappedVitals;
+  const latestVitalsFromHistory = vitalsHistory && vitalsHistory.length > 0 ? vitalsHistory[0] : null;
+  const displayVitals = latestVitalsFromHistory || vitals;
   
   const hasVitals = displayVitals && (
-    displayVitals.bp || 
     displayVitals.blood_pressure?.display || 
     displayVitals.blood_pressure_systolic ||
     displayVitals.heart_rate || 
-    displayVitals.hr ||
     displayVitals.temperature || 
-    displayVitals.temp ||
     displayVitals.respiratory_rate || 
-    displayVitals.rr ||
     displayVitals.oxygen_saturation || 
-    displayVitals.spo2 ||
     displayVitals.weight
   );
   
@@ -2908,10 +2882,7 @@ export default function PatientChart() {
       const response = await patientsApi.getById(patientId);
       return response.data.patient as Patient;
     },
-    enabled: patientId > 0,
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+  
   });
 
   const { data: history } = useQuery({
@@ -2920,9 +2891,7 @@ export default function PatientChart() {
       const response = await encountersApi.getPatientHistory(patientId);
       return response.data as { patient: Patient; encounters: Encounter[] };
     },
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+    
   });
 
   const { data: alerts } = useQuery({
@@ -2932,9 +2901,7 @@ export default function PatientChart() {
       const allAlerts = response.data.alerts || [];
       return allAlerts.filter((a: any) => a.patient_id === patientId);
     },
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+    
   });
 
   // Get user and permissions
@@ -2951,9 +2918,6 @@ export default function PatientChart() {
       return response.data.allergies;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: problemsData } = useQuery({
@@ -2963,9 +2927,6 @@ export default function PatientChart() {
       return response.data.problems;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: medicationsData } = useQuery({
@@ -2975,9 +2936,6 @@ export default function PatientChart() {
       return response.data.medications;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: historiesData } = useQuery({
@@ -2987,9 +2945,7 @@ export default function PatientChart() {
       return response.data.histories;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+    
   });
 
   const { data: immunizationsData } = useQuery({
@@ -2999,9 +2955,7 @@ export default function PatientChart() {
       return response.data.immunizations;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+    
   });
 
   const { data: appointmentsData } = useQuery({
@@ -3011,9 +2965,6 @@ export default function PatientChart() {
       return response.data.appointments;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: resultsData } = useQuery({
@@ -3023,9 +2974,6 @@ export default function PatientChart() {
       return response.data.results;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: admissionsData } = useQuery({
@@ -3035,32 +2983,16 @@ export default function PatientChart() {
       return response.data.admissions;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+  
   });
 
   const { data: vitalsHistoryData } = useQuery({
     queryKey: ['vitalsHistory', patientId],
     queryFn: async () => {
       const response = await clinicalApi.getVitalSigns(patientId);
-      const vitals = response.data.vital_signs || [];
-      return vitals.map((v: any) => ({
-        id: v.id,
-        date: v.recorded_at || new Date().toISOString(),
-        bp: v.blood_pressure_systolic ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` : '--',
-        hr: v.heart_rate,
-        temp: v.temperature,
-        rr: v.respiratory_rate,
-        spo2: v.oxygen_saturation,
-        weight: v.weight,
-        height: v.height,
-      }));
+      return response.data.vital_signs;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
   });
 
   const { data: sbarData } = useQuery({
@@ -3070,9 +3002,7 @@ export default function PatientChart() {
       return response.data.sbars;
     },
     enabled: !!patientId,
-    staleTime,
-    placeholderData: (previousData) => previousData,
-    refetchOnWindowFocus: false,
+    
   });
 
   // Calculate allergies count dynamically
@@ -3106,12 +3036,7 @@ export default function PatientChart() {
   ];
 
   // Get vital signs from clinical API (primary source) and encounters as fallback
-  const allVitals = (() => {
-    // First priority: vitals recorded via clinical API
-    if (vitalsHistoryData && vitalsHistoryData.length > 0) {
-      return vitalsHistoryData[0];
-    }
-    // Fallback: vitals from encounters
+  const encounterVitals = (() => {
     if (history?.encounters && history.encounters.length > 0) {
       return history.encounters[0]?.vital_signs || null;
     }
@@ -3126,7 +3051,7 @@ export default function PatientChart() {
   };
 
   const formatDOB = (dob: string) => {
-    if (!dob) return 'N/A';
+    if (!dob) return 'patient.age';
     return dob.split('T')[0];
   };
 
@@ -3183,7 +3108,7 @@ export default function PatientChart() {
       case 'medications':
         return <MedicationsView patient={patient} medications={medicationsData || []} />;
       case 'vitals':
-        return <VitalSignsView patient={patient} vitals={allVitals} vitalsHistory={vitalsHistoryData || []} />;
+        return <VitalSignsView patient={patient} vitals={encounterVitals} vitalsHistory={vitalsHistoryData || []} />;
       case 'results':
         return <ResultsView patient={patient} labResults={resultsData || []} />;
       case 'histories':
@@ -3196,7 +3121,7 @@ export default function PatientChart() {
         return (
           <SynopsisView 
             patient={patient} 
-            vitals={allVitals}
+            vitals={encounterVitals}
             vitalsHistory={vitalsHistoryData || []}
             medications={medicationsData || []}
             problems={problemsData || []}
@@ -3211,7 +3136,7 @@ export default function PatientChart() {
       case 'reports':
         return <ReportsView patient={patient} />;
       default:
-        return <SynopsisView patient={patient} vitals={allVitals} vitalsHistory={vitalsHistoryData || []} medications={medicationsData || []} problems={problemsData || []} allergies={allergiesData || []} encounters={history?.encounters || []} />;
+        return <SynopsisView patient={patient} vitals={encounterVitals} vitalsHistory={vitalsHistoryData || []} medications={medicationsData || []} problems={problemsData || []} allergies={allergiesData || []} encounters={history?.encounters || []} />;
     }
   };
 
@@ -3344,16 +3269,13 @@ function VisitsView({ patient }: { patient: Patient }) {
     },
   });
 
-  const { data: encounterHistoryData = [], isLoading: encountersLoading } = useQuery({
-  queryKey: ['patientHistory', patient.id],
-  queryFn: async () => {
-    const response = await encountersApi.getPatientHistory(patient.id);
-    const data = response.data;
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.encounters)) return data.encounters;
-    return [];
-  },
-});
+  const { data: encounterHistoryData, isLoading: encountersLoading } = useQuery({
+    queryKey: ['patientHistory', patient.id],
+    queryFn: async () => {
+      const response = await encountersApi.getPatientHistory(patient.id);
+      return response.data.encounters || [];
+    },
+  });
 
   const createAppointmentMutation = useMutation({
     mutationFn: (data: any) => clinicalApi.createAppointment(patient.id, data),

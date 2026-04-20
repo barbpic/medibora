@@ -3,6 +3,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from datetime import datetime
+
 
 audit_bp = Blueprint('audit', __name__)
 
