@@ -18,33 +18,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const initAuth = async () => {
-      const token = localStorage.getItem('access_token');
-      const savedUser = localStorage.getItem('user');
+    // ---------------------------------------------------------
+    // ULTRA-STRICT MODE: Force logout on refresh or project start
+    // ---------------------------------------------------------
+    const forceLogoutOnLoad = () => {
+      // 1. Wipe any saved tokens from a previous session
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
       
-      if (token && savedUser) {
-        try {
-          setUser(JSON.parse(savedUser));
-          // Verify token is still valid
-          const response = await authApi.getCurrentUser();
-          setUser(response.data.user);
-          localStorage.setItem('user', JSON.stringify(response.data.user));
-        } catch (error) {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('user');
-          setUser(null);
-        }
-      }
+      // 2. Ensure user state is null
+      setUser(null);
+      
+      // 3. Stop the loading spinner
       setIsLoading(false);
     };
 
-    initAuth();
-  }, []);
+    forceLogoutOnLoad();
+  }, []); // Empty dependency array means this runs ONCE when the app refreshes or starts
 
   const login = async (username: string, password: string) => {
     const response = await authApi.login(username, password);
     const { access_token, user } = response.data;
     
+    // We STILL save it to localStorage here because your api.ts file 
+    // likely looks for 'access_token' in localStorage to make requests!
     localStorage.setItem('access_token', access_token);
     localStorage.setItem('user', JSON.stringify(user));
     setUser(user);

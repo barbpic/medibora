@@ -120,6 +120,16 @@ export const aiApi = {
   exportFHIR: (patientId: number) => api.get(`/ai/export/fhir/patient/${patientId}`),
   exportHL7: (patientId: number) => api.get(`/ai/export/hl7/patient/${patientId}`),
   exportFHIRBundle: (patientId: number) => api.get(`/ai/export/fhir/bundle/${patientId}`),
+  getRecommendations: (patientId: number) => 
+    api.get(`/ai/recommendations/${patientId}`),
+  
+  getVitalsRisk: (patientId: number) => 
+    api.get(`/ai/vitals-risk/patient/${patientId}`),
+   
+  
+  predictVitalsRisk: (vitalsData: any) => 
+    api.post('/ai/vitals-risk/predict', vitalsData),
+
 };
 
 // Users API

@@ -795,6 +795,376 @@ def health_check():
             '/api/ai/health'
         ]
     }), 200
+# ==================== AI RECOMMENDATIONS FOR PATIENT ====================
 
+# backend/app/routes/ai.py - Update the recommendations endpoint
+
+@ai_bp.route('/recommendations/<int:patient_id>', methods=['GET'])
+@jwt_required()
+def get_ai_recommendations(patient_id):
+    """
+    Get AI-powered recommendations based on patient's vitals and clinical data
+    Returns both structured and full text recommendations
+    """
+    current_user_id = int(get_jwt_identity())
+    
+    # Get patient
+    patient = Patient.query.get(patient_id)
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+    
+    # Get latest vital signs
+    latest_vitals = VitalSigns.query.filter_by(
+        patient_id=patient_id
+    ).order_by(VitalSigns.recorded_at.desc()).first()
+    
+    if not latest_vitals:
+        return jsonify({
+            'error': 'No vital signs recorded for this patient',
+            'recommendations': {
+                'priority_actions': ['Record vital signs to generate AI recommendations'],
+                'monitoring': ['Schedule initial assessment'],
+                'lifestyle': ['Regular health checkup recommended']
+            }
+        }), 200
+    
+    # Prepare vitals data
+    vitals_data = {
+        'heart_rate': latest_vitals.heart_rate,
+        'respiratory_rate': latest_vitals.respiratory_rate,
+        'temperature': latest_vitals.temperature,
+        'oxygen_saturation': latest_vitals.oxygen_saturation,
+        'systolic_bp': latest_vitals.blood_pressure_systolic,
+        'diastolic_bp': latest_vitals.blood_pressure_diastolic,
+        'age': patient.get_age(),
+        'gender': patient.gender,
+        'weight': latest_vitals.weight,
+        'height': latest_vitals.height,
+    }
+    
+    # Get risk assessment
+    risk_result = vitals_risk_predictor.predict(vitals_data)
+    
+    # Generate structured recommendations
+    structured_recs = generate_structured_recommendations(
+        patient, latest_vitals, risk_result
+    )
+    
+    # Generate full text recommendation (like the expected output)
+    full_text_recommendation = generate_full_text_recommendation(
+        patient, latest_vitals, risk_result
+    )
+    
+    log_action(current_user_id, 'get_recommendations', 'patient', str(patient_id), 
+              f'Risk level: {risk_result["risk_level"]}')
+    
+    return jsonify({
+        'patient_id': patient_id,
+        'patient_name': f"{patient.first_name} {patient.last_name}",
+        'assessment_time': datetime.utcnow().isoformat(),
+        'risk_summary': {
+            'level': risk_result['risk_level'],
+            'score': risk_result['risk_score'],
+            'percentage': risk_result['risk_percentage']
+        },
+        'abnormal_findings': risk_result.get('abnormal_findings', []),
+        'news2_score': risk_result.get('news2_score', 0),
+        'news2_interpretation': risk_result.get('news2_interpretation', ''),
+        # NEW: Full text recommendation (like expected output)
+        'full_recommendation': full_text_recommendation,
+        # Structured recommendations (for UI components)
+        'structured_recommendations': structured_recs
+    }), 200
+
+
+def generate_full_text_recommendation(patient, vitals, risk_result):
+    """
+    Generate the full text recommendation with all bullet points
+    This matches the expected output format
+    """
+    risk_score = risk_result['risk_score']
+    risk_level = risk_result['risk_level']
+    findings = risk_result.get('abnormal_findings', [])
+    
+    lines = []
+    
+    # Header with emoji based on risk level
+    if risk_score >= 0.7:
+        lines.append("🔴 IMMEDIATE ACTION REQUIRED:")
+    elif risk_score >= 0.4:
+        lines.append("🟡 CLOSE MONITORING REQUIRED:")
+    else:
+        lines.append("🟢 ROUTINE CARE:")
+    
+    # Add action items based on specific abnormalities
+    actions_added = set()
+    
+    # Check each vital sign and add appropriate actions
+    if vitals.oxygen_saturation and vitals.oxygen_saturation < 90:
+        lines.append("   • Administer supplemental oxygen")
+        actions_added.add('oxygen')
+    elif vitals.oxygen_saturation and vitals.oxygen_saturation < 94:
+        lines.append("   • Monitor oxygen saturation closely")
+        actions_added.add('oxygen_monitor')
+    
+    if vitals.blood_pressure_systolic and vitals.blood_pressure_systolic < 90:
+        lines.append("   • Start IV fluids")
+        actions_added.add('fluids')
+    elif vitals.blood_pressure_systolic and vitals.blood_pressure_systolic > 180:
+        lines.append("   • Administer antihypertensive medication")
+        actions_added.add('bp_meds')
+    
+    if vitals.temperature and vitals.temperature > 39.0:
+        lines.append("   • Administer antipyretics")
+        lines.append("   • Order blood cultures and CBC")
+        actions_added.add('antipyretics')
+    elif vitals.temperature and vitals.temperature > 38.0:
+        lines.append("   • Consider antipyretics if symptomatic")
+        actions_added.add('antipyretics_mild')
+    
+    if vitals.heart_rate and vitals.heart_rate > 120:
+        lines.append("   • Order ECG")
+        lines.append("   • Assess for dehydration or pain")
+        actions_added.add('ecg')
+    elif vitals.heart_rate and vitals.heart_rate > 100:
+        lines.append("   • Monitor heart rate trends")
+        actions_added.add('hr_monitor')
+    
+    if vitals.respiratory_rate and vitals.respiratory_rate > 24:
+        lines.append("   • Assess respiratory status")
+        lines.append("   • Consider chest X-ray")
+        actions_added.add('resp_assess')
+    
+    # Add general actions based on risk level
+    if risk_score >= 0.7:
+        if 'notify' not in actions_added:
+            lines.append("   • Notify attending physician immediately")
+        if 'admit' not in actions_added:
+            lines.append("   • Consider hospital admission")
+        if 'repeat_vitals' not in actions_added:
+            lines.append("   • Repeat vital signs in 15 minutes")
+    
+    # Add age-specific actions
+    age = patient.get_age()
+    if age and age > 75:
+        lines.append("   • Consider geriatric assessment")
+        lines.append("   • Review medication list for interactions")
+    elif age and age > 65:
+        lines.append("   • Review medication list for potential interactions")
+    
+    # Add chronic condition specific actions
+    if patient.chronic_conditions:
+        if 'hypertension' in patient.chronic_conditions.lower():
+            lines.append("   • Review antihypertensive regimen")
+        if 'diabetes' in patient.chronic_conditions.lower():
+            lines.append("   • Check blood glucose")
+        if 'asthma' in patient.chronic_conditions.lower() or 'copd' in patient.chronic_conditions.lower():
+            lines.append("   • Assess peak flow and inhaler technique")
+    
+    # Remove duplicates while preserving order
+    unique_lines = []
+    for line in lines:
+        if line not in unique_lines:
+            unique_lines.append(line)
+    
+    return "\n".join(unique_lines)
+
+
+def generate_structured_recommendations(patient, vitals, risk_result):
+    """
+    Generate structured recommendations (for UI components)
+    This is your existing function but kept for compatibility
+    """
+    priority_actions = []
+    monitoring_suggestions = []
+    lifestyle_advice = []
+    
+    # Get abnormal findings
+    risk_score = risk_result['risk_score']
+    risk_level = risk_result['risk_level']
+    
+    # ============================================================
+    # PRIORITY ACTIONS
+    # ============================================================
+    
+    # Oxygen/Respiratory issues
+    if vitals.oxygen_saturation and vitals.oxygen_saturation < 90:
+        priority_actions.append({
+            'action': '🚨 Start supplemental oxygen immediately',
+            'priority': 'critical',
+            'reason': f'SpO2 is {vitals.oxygen_saturation}% (severe hypoxemia)'
+        })
+    elif vitals.oxygen_saturation and vitals.oxygen_saturation < 94:
+        priority_actions.append({
+            'action': '📊 Monitor oxygen saturation closely',
+            'priority': 'high',
+            'reason': f'SpO2 is {vitals.oxygen_saturation}% (below normal range)'
+        })
+    
+    # Respiratory rate issues
+    if vitals.respiratory_rate and vitals.respiratory_rate > 24:
+        priority_actions.append({
+            'action': '🫁 Assess respiratory distress',
+            'priority': 'critical',
+            'reason': f'Respiratory rate is {vitals.respiratory_rate}/min (tachypnea)'
+        })
+    elif vitals.respiratory_rate and vitals.respiratory_rate > 20:
+        priority_actions.append({
+            'action': '📈 Monitor respiratory rate',
+            'priority': 'medium',
+            'reason': f'Respiratory rate is {vitals.respiratory_rate}/min (elevated)'
+        })
+    
+    # Blood pressure issues
+    if vitals.blood_pressure_systolic and vitals.blood_pressure_systolic > 180:
+        priority_actions.append({
+            'action': '🚑 Immediate BP reduction needed',
+            'priority': 'critical',
+            'reason': f'BP is {vitals.blood_pressure_systolic}/{vitals.blood_pressure_diastolic} mmHg (hypertensive crisis)'
+        })
+    elif vitals.blood_pressure_systolic and vitals.blood_pressure_systolic > 140:
+        priority_actions.append({
+            'action': '💊 Review antihypertensive medication',
+            'priority': 'high',
+            'reason': f'BP is {vitals.blood_pressure_systolic}/{vitals.blood_pressure_diastolic} mmHg (elevated)'
+        })
+    elif vitals.blood_pressure_systolic and vitals.blood_pressure_systolic < 90:
+        priority_actions.append({
+            'action': '💧 Start IV fluids',
+            'priority': 'critical',
+            'reason': f'BP is {vitals.blood_pressure_systolic}/{vitals.blood_pressure_diastolic} mmHg (hypotension)'
+        })
+    
+    # Temperature issues
+    if vitals.temperature and vitals.temperature > 39.0:
+        priority_actions.append({
+            'action': '🌡️ Administer antipyretics and investigate infection source',
+            'priority': 'high',
+            'reason': f'Temperature is {vitals.temperature}°C (high fever)'
+        })
+    elif vitals.temperature and vitals.temperature > 38.0:
+        priority_actions.append({
+            'action': '🦠 Order blood cultures and WBC count',
+            'priority': 'medium',
+            'reason': f'Temperature is {vitals.temperature}°C (fever)'
+        })
+    
+    # Heart rate issues
+    if vitals.heart_rate and vitals.heart_rate > 120:
+        priority_actions.append({
+            'action': '❤️ Order ECG and cardiac evaluation',
+            'priority': 'high',
+            'reason': f'Heart rate is {vitals.heart_rate} bpm (severe tachycardia)'
+        })
+    elif vitals.heart_rate and vitals.heart_rate > 100:
+        priority_actions.append({
+            'action': '🩺 Assess for dehydration, pain, or infection',
+            'priority': 'medium',
+            'reason': f'Heart rate is {vitals.heart_rate} bpm (tachycardia)'
+        })
+    elif vitals.heart_rate and vitals.heart_rate < 50:
+        priority_actions.append({
+            'action': '📋 Review medications (beta-blockers, digoxin)',
+            'priority': 'medium',
+            'reason': f'Heart rate is {vitals.heart_rate} bpm (bradycardia)'
+        })
+    
+    # Age-specific actions
+    age = patient.get_age()
+    if age and age > 75:
+        priority_actions.append({
+            'action': '👴 Consider geriatric assessment',
+            'priority': 'medium',
+            'reason': f'Patient age: {age} years (elderly)'
+        })
+    elif age and age > 65:
+        priority_actions.append({
+            'action': '📝 Review medication list for interactions',
+            'priority': 'low',
+            'reason': f'Patient age: {age} years (increased risk)'
+        })
+    
+    # ============================================================
+    # MONITORING SUGGESTIONS
+    # ============================================================
+    
+    if risk_level == 'HIGH RISK':
+        monitoring_suggestions.append({
+            'suggestion': '🔴 Reassess vital signs every 15-30 minutes',
+            'frequency': '15-30 minutes',
+            'duration': 'Until stable'
+        })
+        monitoring_suggestions.append({
+            'suggestion': '🏥 Consider ICU transfer or close monitoring unit',
+            'frequency': 'Continuous',
+            'duration': '24-48 hours'
+        })
+    elif risk_level == 'MODERATE RISK':
+        monitoring_suggestions.append({
+            'suggestion': '🟡 Monitor vital signs every 2-4 hours',
+            'frequency': '2-4 hours',
+            'duration': '24 hours'
+        })
+        monitoring_suggestions.append({
+            'suggestion': '📞 Schedule follow-up within 24-48 hours',
+            'frequency': 'Once',
+            'duration': 'Follow-up'
+        })
+    else:
+        monitoring_suggestions.append({
+            'suggestion': '🟢 Routine vital signs monitoring',
+            'frequency': 'As scheduled',
+            'duration': 'Ongoing'
+        })
+    
+    if vitals.oxygen_saturation and vitals.oxygen_saturation < 94:
+        monitoring_suggestions.append({
+            'suggestion': '📊 Continuous pulse oximetry monitoring',
+            'frequency': 'Continuous',
+            'duration': 'Until SpO2 > 94%'
+        })
+    
+    # ============================================================
+    # LIFESTYLE ADVICE
+    # ============================================================
+    
+    if vitals.blood_pressure_systolic and vitals.blood_pressure_systolic > 130:
+        lifestyle_advice.append({
+            'advice': '🧂 Reduce sodium intake (less than 2g/day)',
+            'category': 'Diet',
+            'reason': 'To help lower blood pressure'
+        })
+        lifestyle_advice.append({
+            'advice': '🏃 Regular aerobic exercise (30 min, 5x/week)',
+            'category': 'Exercise',
+            'reason': 'Improves cardiovascular health'
+        })
+    
+    lifestyle_advice.append({
+        'advice': '💧 Stay hydrated (8-10 glasses of water daily)',
+        'category': 'Hydration',
+        'reason': 'Essential for overall health'
+    })
+    lifestyle_advice.append({
+        'advice': '😴 Maintain regular sleep schedule (7-8 hours)',
+        'category': 'Sleep',
+        'reason': 'Improves immune function and recovery'
+    })
+    lifestyle_advice.append({
+        'advice': '🚭 Avoid smoking and limit alcohol',
+        'category': 'Lifestyle',
+        'reason': 'Reduces cardiovascular risk'
+    })
+    
+    # Limit items
+    priority_actions = priority_actions[:5]
+    monitoring_suggestions = monitoring_suggestions[:3]
+    lifestyle_advice = lifestyle_advice[:4]
+    
+    return {
+        'priority_actions': priority_actions,
+        'monitoring': monitoring_suggestions,
+        'lifestyle': lifestyle_advice
+    }
 
 import json

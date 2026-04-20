@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { patientsApi, encountersApi, aiApi, clinicalApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import AIRecommendations from '@/components/AIRecommendations';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -2441,183 +2442,7 @@ function ScheduleView({ patient, appointments }: { patient: Patient; appointment
 }
 
 // AI Risk Assessment Suggestions Component
-function RiskAssessmentSuggestions({ patient }: { patient: Patient }) {
-  const { id } = useParams<{ id: string }>();
-  const patientId = parseInt(id || '0');
-  const [suggestions, setSuggestions] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(false);
 
-  // In RiskAssessmentSuggestions component
-  const { data: vitalsData } = useQuery({
-    queryKey: ['vitalsHistory', patientId, 'latest'], // Added 'latest' to make it unique
-    queryFn: async () => {
-      const response = await clinicalApi.getVitalSigns(patientId);
-      return response.data.vital_signs?.[0] || null;
-    },
-  });
-
-  const { data: encountersData } = useQuery({
-    queryKey: ['patientHistory', patientId, 'encountersOnly'], // Added 'encountersOnly'
-    queryFn: async () => {
-      const response = await encountersApi.getPatientHistory(patientId);
-      return response.data.encounters || [];
-    },
-  });
-
-  const generateSuggestions = () => {
-    setIsLoading(true);
-    
-    // Generate suggestions based on patient data
-    const newSuggestions: any = {
-      priority_actions: [],
-      monitoring: [],
-      lifestyle: [],
-      follow_up: []
-    };
-
-    // Age-based suggestions
-    if (patient.age >= 65) {
-      newSuggestions.priority_actions.push('Consider geriatric assessment');
-      newSuggestions.priority_actions.push('Review medication list for interactions');
-    }
-
-    // Chronic conditions
-    if (patient.chronic_conditions) {
-      const conditions = patient.chronic_conditions.toLowerCase();
-      if (conditions.includes('diabetes')) {
-        newSuggestions.monitoring.push('Check HbA1c; monitor blood glucose');
-        newSuggestions.follow_up.push('Schedule diabetic eye examination');
-      }
-      if (conditions.includes('hypertension')) {
-        newSuggestions.monitoring.push('Monitor blood pressure regularly');
-        newSuggestions.lifestyle.push('Reduce sodium intake; regular exercise');
-      }
-      if (conditions.includes('asthma')) {
-        newSuggestions.monitoring.push('Review inhaler technique; check peak flow');
-      }
-      if (conditions.includes('hiv')) {
-        newSuggestions.monitoring.push('Monitor CD4 count and viral load');
-      }
-    }
-
-    // Vital signs suggestions
-    if (vitalsData) {
-      if (vitalsData.blood_pressure_systolic && vitalsData.blood_pressure_systolic >= 140) {
-        newSuggestions.priority_actions.push('Review antihypertensive therapy');
-      }
-      if (vitalsData.oxygen_saturation && vitalsData.oxygen_saturation < 92) {
-        newSuggestions.priority_actions.push('Assess respiratory status; consider oxygen');
-      }
-      if (vitalsData.temperature && vitalsData.temperature > 38.5) {
-        newSuggestions.priority_actions.push('Investigate potential infection');
-      }
-    }
-
-    // Visit frequency
-    if (encountersData && encountersData.length > 0) {
-      const recentEncounters = encountersData.filter((e: any) => {
-        const visitDate = new Date(e.visit_date);
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-        return visitDate >= threeMonthsAgo;
-      });
-      
-      if (recentEncounters.length >= 3) {
-        newSuggestions.follow_up.push(`Patient has ${recentEncounters.length} visits in last 3 months - review care plan`);
-      }
-    }
-
-    // If no suggestions, add a default one
-    if (newSuggestions.priority_actions.length === 0 && 
-        newSuggestions.monitoring.length === 0 && 
-        newSuggestions.lifestyle.length === 0 &&
-        newSuggestions.follow_up.length === 0) {
-      newSuggestions.monitoring.push('Continue routine care');
-    }
-
-    setSuggestions(newSuggestions);
-    setIsLoading(false);
-  };
-
-  return (
-    <Card className="border border-blue-200 bg-blue-50">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-blue-600" />
-            <span className="font-semibold text-blue-800">AI Risk Assessment Suggestions</span>
-          </div>
-          <Button 
-            size="sm" 
-            variant="outline"
-            onClick={generateSuggestions}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Analyzing...' : 'Generate Suggestions'}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {suggestions ? (
-          <div className="space-y-4">
-            {suggestions.priority_actions.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-red-700 mb-1">Priority Actions</p>
-                <ul className="space-y-1">
-                  {suggestions.priority_actions.map((action: string, i: number) => (
-                    <li key={i} className="text-sm text-red-600 flex items-center gap-2">
-                      <span className="text-red-500">•</span> {action}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {suggestions.monitoring.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-orange-700 mb-1">Monitoring</p>
-                <ul className="space-y-1">
-                  {suggestions.monitoring.map((item: string, i: number) => (
-                    <li key={i} className="text-sm text-orange-600 flex items-center gap-2">
-                      <span className="text-orange-500">•</span> {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {suggestions.lifestyle.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-green-700 mb-1">Lifestyle</p>
-                <ul className="space-y-1">
-                  {suggestions.lifestyle.map((item: string, i: number) => (
-                    <li key={i} className="text-sm text-green-600 flex items-center gap-2">
-                      <span className="text-green-500">•</span> {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {suggestions.follow_up.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-blue-700 mb-1">Follow-up</p>
-                <ul className="space-y-1">
-                  {suggestions.follow_up.map((item: string, i: number) => (
-                    <li key={i} className="text-sm text-blue-600 flex items-center gap-2">
-                      <span className="text-blue-500">•</span> {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            Click "Generate Suggestions" to get AI-powered risk assessment and clinical recommendations based on patient data.
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 // Synopsis Component (Main Dashboard View)
 function SynopsisView({ patient, vitals, vitalsHistory, medications, problems, allergies, encounters }: { 
@@ -2864,8 +2689,11 @@ function SynopsisView({ patient, vitals, vitalsHistory, medications, problems, a
         </CardContent>
       </Card>
 
-      {/* AI Risk Assessment Suggestions */}
-      <RiskAssessmentSuggestions patient={patient} />
+      {/* AI Recommendations Section */}
+      <div className="mt-6">
+        <h3 className="font-semibold text-lg mb-3">AI Recommendations</h3>
+        <AIRecommendations patientId={patient.id} />
+      </div>
     </div>
   );
 }
